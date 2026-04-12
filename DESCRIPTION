@@ -1,0 +1,30 @@
+Package: mousecolony
+Title: Mouse Colony Manager App
+Version: 0.1.0
+Authors@R:
+    person("OpenAI", "Codex", email = "noreply@example.com", role = c("aut", "cre"))
+Description: A Shiny application for importing SoftMouse exports, managing
+    local colony operations state, tracing lineage, and drawing pedigrees.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Imports:
+    shiny,
+    bslib,
+    DT,
+    DBI,
+    RSQLite,
+    dplyr,
+    ggplot2,
+    jsonlite,
+    openxlsx,
+    plotly,
+    purrr,
+    readr,
+    stringr,
+    tibble,
+    tidyr
+Suggests:
+    testthat,
+    ggped,
+    ggpedigree

@@ -1,0 +1,31 @@
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+.DS_Store
+
+# Local databases and journals
+*.sqlite
+*.sqlite-journal
+*.db
+
+# Shiny / bslib cache
+data/.sass-cache/
+
+# App import archives and local working data
+data/import_archive/
+data/*.xlsx
+data/*.csv
+data/*.txt
+
+# Dependency and package build outputs
+renv/library/
+renv/python/
+src/*.o
+src/*.so
+src/*.dll
+*.tar.gz
+
+# Test / temp artifacts
+tmp/
+temp/
