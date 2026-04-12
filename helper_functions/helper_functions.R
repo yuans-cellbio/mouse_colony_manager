@@ -265,15 +265,27 @@ GeomPedigreePoint <- ggproto(
     isdead = 0
   ),
   setup_data = function(data, param) {
-    # Check if 'sex' is a factor
-    if (!is.factor(data$sex)) {
-      stop("The 'sex' column must be of class 'factor'.")
+    if (!is.factor(data$sex) && !is.numeric(data$sex) && !is.character(data$sex)) {
+      stop("The 'sex' column must be coercible to pedigree shape codes.")
     }
-    
-    # Check if 'isdead' is either a factor or a logical vector
-    if (!is.factor(data$isdead) && !is.logical(data$isdead)) {
-      stop("The 'isdead' column must be of class 'factor' or 'logical'.")
+
+    sex_chr <- toupper(trimws(as.character(data$sex)))
+    sex_num <- suppressWarnings(as.numeric(sex_chr))
+    sex_num[is.na(sex_num) & sex_chr %in% c("M", "MALE")] <- 22
+    sex_num[is.na(sex_num) & sex_chr %in% c("F", "FEMALE")] <- 21
+    sex_num[is.na(sex_num)] <- 0
+    data$sex <- sex_num
+
+    if (!is.factor(data$isdead) && !is.logical(data$isdead) && !is.numeric(data$isdead) && !is.character(data$isdead)) {
+      stop("The 'isdead' column must be coercible to death-status codes.")
     }
+
+    isdead_chr <- trimws(as.character(data$isdead))
+    isdead_num <- suppressWarnings(as.numeric(isdead_chr))
+    isdead_num[is.na(isdead_num) & toupper(isdead_chr) %in% c("FALSE", "ALIVE")] <- 0
+    isdead_num[is.na(isdead_num) & toupper(isdead_chr) %in% c("TRUE", "DEAD", "ENDED")] <- 1
+    isdead_num[is.na(isdead_num)] <- 0
+    data$isdead <- isdead_num
     
     ####################################################
     # 'feature.value' is modified to take a value 0-1. #
@@ -281,7 +293,7 @@ GeomPedigreePoint <- ggproto(
     
     if (!is.numeric(data$feature.value)) {
       stop("The 'feature.value' column must be a number.")
-    } else if (any(data$feature.value < 0 | data$feature.value > 1)) {
+    } else if (any(data$feature.value < 0 | data$feature.value > 1, na.rm = TRUE)) {
       stop("The 'feature.value' column must be between 0 and 1.")
     }
     

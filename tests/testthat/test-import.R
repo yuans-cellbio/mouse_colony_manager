@@ -111,7 +111,7 @@ test_that("merge_import_sources prefers softmouse rows but preserves local-only 
   merged <- merge_import_sources(soft, snap)
 
   expect_equal(sort(merged$mouse_id), c("100", "101", "102"))
-  expect_equal(merged$source_type[merged$mouse_id == "101"], "softmouse")
+  expect_equal(merged$source_type[merged$mouse_id == "101"], "merged_import")
   expect_equal(merged$source_type[merged$mouse_id == "102"], "local_snapshot")
 })
 
@@ -168,6 +168,88 @@ test_that("merge_import_sources repairs implausible softmouse dates from the sna
   expect_equal(merged$dob[[1]], as.Date("2026-02-01"))
   expect_true(is_plausible_mouse_age_days(merged$age_days[[1]]))
   expect_true(merged$age_weeks[[1]] < 100)
+})
+
+test_that("detect_import_conflicts returns per-field overlaps and merge requires resolutions", {
+  imported_at <- as.POSIXct("2026-04-12 10:00:00", tz = "UTC")
+
+  soft <- tibble::tibble(
+    source_type = "softmouse",
+    source_path = "soft.xlsx",
+    source_file = "soft.xlsx",
+    imported_at = imported_at,
+    mouse_id = "200",
+    alt_id = NA_character_,
+    mouse_sid = NA_character_,
+    sex = "F",
+    dob = as.Date("2026-01-01"),
+    end_date = as.Date(NA),
+    end_type = NA_character_,
+    age_source = "10 wk",
+    age_days = 70,
+    age_weeks = 10,
+    age_label = "10.0 wk",
+    status = "Active",
+    alive = TRUE,
+    raw_genotype = "GeneA(Wt/Wt)",
+    mouse_line = "Line1",
+    generation = "F1",
+    first_gene = "GeneA",
+    second_gene = NA_character_,
+    protocol = "P1",
+    sire_id = "100",
+    dam_id = "101",
+    mate_id = NA_character_,
+    source_comment = "soft",
+    founder = FALSE
+  )
+
+  snap <- soft |>
+    dplyr::mutate(
+      source_type = "local_snapshot",
+      source_path = "snap.xlsx",
+      source_file = "snap.xlsx",
+      imported_at = imported_at - 3600,
+      protocol = "P2",
+      source_comment = "snapshot"
+    )
+
+  conflicts <- detect_import_conflicts(soft, snap)
+  expect_true(all(c("protocol", "source_comment") %in% conflicts$field))
+
+  expect_error(
+    merge_import_sources(soft, snap, require_resolved = TRUE),
+    "Resolve all import conflicts"
+  )
+
+  resolved <- merge_import_sources(
+    soft,
+    snap,
+    conflict_resolutions = tibble::tibble(
+      mouse_id = c("200", "200"),
+      field = c("protocol", "source_comment"),
+      chosen_source = c("local_snapshot", "softmouse")
+    ),
+    require_resolved = TRUE
+  )
+
+  expect_equal(resolved$protocol[[1]], "P2")
+  expect_equal(resolved$source_comment[[1]], "soft")
+})
+
+test_that("default_conflict_resolutions chooses softmouse for every conflict", {
+  conflicts <- tibble::tibble(
+    mouse_id = c("200", "200", "201"),
+    field = c("protocol", "source_comment", "mouse_line"),
+    softmouse_value = c("P1", "soft", "L1"),
+    snapshot_value = c("P2", "snapshot", "L2")
+  )
+
+  resolutions <- default_conflict_resolutions(conflicts)
+
+  expect_equal(nrow(resolutions), 3)
+  expect_true(all(resolutions$chosen_source == "softmouse"))
+  expect_equal(nrow(find_unresolved_import_conflicts(conflicts, resolutions)), 0)
 })
 
 test_that("find_latest_data_file uses filename timestamps", {

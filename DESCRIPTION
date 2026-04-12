@@ -27,4 +27,6 @@ Imports:
 Suggests:
     testthat,
     ggped,
-    ggpedigree
+    ggpedigree,
+    kinship2,
+    RColorBrewer

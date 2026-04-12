@@ -690,49 +690,6 @@ archive_uploaded_file <- function(upload_info, source_label,
   normalizePath(dest_path, winslash = "/", mustWork = FALSE)
 }
 
-detect_import_conflicts <- function(softmouse_df, snapshot_df) {
-  if (nrow(softmouse_df) == 0 || nrow(snapshot_df) == 0) {
-    return(tibble::tibble())
-  }
-
-  compare_cols <- c(
-    "sex", "dob", "end_date", "end_type", "status", "raw_genotype",
-    "mouse_line", "generation", "sire_id", "dam_id", "mate_id"
-  )
-
-  overlap <- softmouse_df |>
-    dplyr::select(mouse_id, dplyr::all_of(compare_cols)) |>
-    dplyr::inner_join(
-      snapshot_df |>
-        dplyr::select(mouse_id, dplyr::all_of(compare_cols)),
-      by = "mouse_id",
-      suffix = c("_softmouse", "_snapshot")
-    )
-
-  if (nrow(overlap) == 0) {
-    return(tibble::tibble())
-  }
-
-  purrr::pmap_dfr(overlap, function(...) {
-    row <- list(...)
-    mouse_id <- row$mouse_id
-    differing_fields <- compare_cols[vapply(compare_cols, function(col) {
-      soft_val <- row[[paste0(col, "_softmouse")]]
-      snap_val <- row[[paste0(col, "_snapshot")]]
-      !identical(as.character(soft_val %||% NA), as.character(snap_val %||% NA))
-    }, logical(1))]
-
-    if (length(differing_fields) == 0) {
-      return(NULL)
-    }
-
-    tibble::tibble(
-      mouse_id = mouse_id,
-      differing_fields = paste(differing_fields, collapse = ", ")
-    )
-  })
-}
-
 detect_duplicate_ids <- function(df, source_label) {
   if (nrow(df) == 0) {
     return(tibble::tibble())
@@ -745,12 +702,44 @@ detect_duplicate_ids <- function(df, source_label) {
     dplyr::select(source, mouse_id, duplicate_count)
 }
 
-build_import_summary <- function(previous_df, softmouse_df, snapshot_df, merged_df) {
+find_missing_parent_records <- function(df) {
+  if (nrow(df) == 0) {
+    return(tibble::tibble(
+      mouse_id = character(),
+      missing_parent_role = character(),
+      missing_parent_id = character()
+    ))
+  }
+
+  mouse_ids <- unique(stats::na.omit(df$mouse_id))
+
+  dplyr::bind_rows(
+    df |>
+      dplyr::transmute(
+        mouse_id,
+        missing_parent_role = "sire",
+        missing_parent_id = sire_id
+      ),
+    df |>
+      dplyr::transmute(
+        mouse_id,
+        missing_parent_role = "dam",
+        missing_parent_id = dam_id
+      )
+  ) |>
+    dplyr::filter(!is.na(missing_parent_id), !missing_parent_id %in% mouse_ids) |>
+    dplyr::distinct()
+}
+
+build_import_summary <- function(previous_df, softmouse_df, snapshot_df, merged_df,
+                                 conflict_resolutions = NULL) {
   conflicts <- detect_import_conflicts(softmouse_df, snapshot_df)
+  unresolved_conflicts <- find_unresolved_import_conflicts(conflicts, conflict_resolutions)
   duplicates <- dplyr::bind_rows(
     detect_duplicate_ids(softmouse_df, "SoftMouse export"),
     detect_duplicate_ids(snapshot_df, "Local snapshot")
   )
+  missing_parents <- find_missing_parent_records(merged_df)
 
   previous_ids <- if ("mouse_id" %in% names(previous_df)) previous_df$mouse_id else character(0)
   merged_ids <- if ("mouse_id" %in% names(merged_df)) merged_df$mouse_id else character(0)
@@ -763,7 +752,11 @@ build_import_summary <- function(previous_df, softmouse_df, snapshot_df, merged_
       "New mice versus current DB",
       "Rows preserved from previous DB",
       "Source conflicts",
+      "Resolved conflicts",
+      "Unresolved conflicts",
       "Duplicate IDs in uploaded files"
+      ,
+      "Missing parent links"
     ),
     value = c(
       nrow(softmouse_df),
@@ -772,26 +765,104 @@ build_import_summary <- function(previous_df, softmouse_df, snapshot_df, merged_
       sum(!merged_ids %in% previous_ids),
       sum(previous_ids %in% merged_ids),
       nrow(conflicts),
-      nrow(duplicates)
+      nrow(conflicts) - nrow(unresolved_conflicts),
+      nrow(unresolved_conflicts),
+      nrow(duplicates),
+      nrow(missing_parents)
     )
   )
 
   list(
     metrics = metrics,
     conflicts = conflicts,
+    unresolved_conflicts = unresolved_conflicts,
     duplicates = duplicates
+    ,
+    missing_parents = missing_parents
+  )
+}
+
+log_import_conflict_resolutions <- function(con, resolutions, conflicts) {
+  resolutions <- normalize_conflict_resolutions(resolutions)
+  if (nrow(resolutions) == 0 || nrow(conflicts) == 0) {
+    return(invisible(NULL))
+  }
+
+  resolved_rows <- conflicts |>
+    dplyr::inner_join(resolutions, by = c("mouse_id", "field"))
+
+  purrr::pwalk(resolved_rows, function(mouse_id, field, softmouse_value, snapshot_value, chosen_source) {
+    log_change(
+      con,
+      entity_type = "import_conflict",
+      entity_id = paste(mouse_id, field, sep = "::"),
+      action = "resolved",
+      payload = list(
+        mouse_id = mouse_id,
+        field = field,
+        chosen_source = chosen_source,
+        softmouse_value = softmouse_value,
+        snapshot_value = snapshot_value
+      )
+    )
+  })
+}
+
+preview_manual_import <- function(db_path, softmouse_path, snapshot_path = NA_character_) {
+  ensure_colony_store(db_path)
+  previous_df <- tryCatch(load_current_colony(db_path), error = function(...) empty_colony_df())
+
+  softmouse_df <- import_softmouse(softmouse_path)
+  snapshot_df <- import_colony_snapshot(snapshot_path)
+  conflict_resolutions <- default_conflict_resolutions(detect_import_conflicts(softmouse_df, snapshot_df))
+  merged_df <- merge_import_sources(
+    softmouse_df,
+    snapshot_df,
+    conflict_resolutions = conflict_resolutions,
+    require_resolved = FALSE
+  )
+  summary <- build_import_summary(
+    previous_df,
+    softmouse_df,
+    snapshot_df,
+    merged_df,
+    conflict_resolutions = conflict_resolutions
+  )
+
+  list(
+    current_df = merged_df,
+    metrics = summary$metrics,
+    conflicts = summary$conflicts,
+    unresolved_conflicts = summary$unresolved_conflicts,
+    duplicates = summary$duplicates,
+    missing_parents = summary$missing_parents,
+    conflict_resolutions = conflict_resolutions,
+    softmouse_df = softmouse_df,
+    snapshot_df = snapshot_df
   )
 }
 
 run_manual_import <- function(db_path, softmouse_path, snapshot_path = NA_character_,
-                              census_path = NA_character_) {
+                              census_path = NA_character_, conflict_resolutions = NULL) {
   ensure_colony_store(db_path)
-  previous_df <- tryCatch(load_current_colony(db_path), error = function(...) tibble::tibble())
+  previous_df <- tryCatch(load_current_colony(db_path), error = function(...) empty_colony_df())
 
   softmouse_df <- import_softmouse(softmouse_path)
   snapshot_df <- import_colony_snapshot(snapshot_path)
-  merged_df <- merge_import_sources(softmouse_df, snapshot_df)
-  summary <- build_import_summary(previous_df, softmouse_df, snapshot_df, merged_df)
+  conflicts <- detect_import_conflicts(softmouse_df, snapshot_df)
+  unresolved_conflicts <- find_unresolved_import_conflicts(conflicts, conflict_resolutions)
+
+  if (nrow(unresolved_conflicts) > 0) {
+    stop("Resolve all import conflicts before completing the merge.", call. = FALSE)
+  }
+
+  merged_df <- merge_import_sources(
+    softmouse_df,
+    snapshot_df,
+    conflict_resolutions = conflict_resolutions,
+    require_resolved = TRUE
+  )
+  summary <- build_import_summary(previous_df, softmouse_df, snapshot_df, merged_df, conflict_resolutions = conflict_resolutions)
 
   con <- connect_colony_db(db_path)
   on.exit(DBI::dbDisconnect(con), add = TRUE)
@@ -802,19 +873,27 @@ run_manual_import <- function(db_path, softmouse_path, snapshot_path = NA_charac
     seed_annotations_from_census(con, census_path)
   }
 
+  log_import_conflict_resolutions(con, conflict_resolutions, conflicts)
   log_change(con, "import", basename(softmouse_path), "manual_import", list(
     softmouse_rows = nrow(softmouse_df),
     snapshot_rows = nrow(snapshot_df),
     merged_rows = nrow(merged_df),
     conflicts = nrow(summary$conflicts),
+    resolved_conflicts = nrow(summary$conflicts) - nrow(summary$unresolved_conflicts),
+    unresolved_conflicts = nrow(summary$unresolved_conflicts),
     duplicates = nrow(summary$duplicates)
+    ,
+    missing_parent_links = nrow(summary$missing_parents)
   ))
 
   list(
     current_df = merged_df,
     metrics = summary$metrics,
     conflicts = summary$conflicts,
+    unresolved_conflicts = summary$unresolved_conflicts,
     duplicates = summary$duplicates,
+    missing_parents = summary$missing_parents,
+    conflict_resolutions = normalize_conflict_resolutions(conflict_resolutions),
     softmouse_df = softmouse_df,
     snapshot_df = snapshot_df
   )
