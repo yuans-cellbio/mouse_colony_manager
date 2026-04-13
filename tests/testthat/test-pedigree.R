@@ -1,4 +1,6 @@
 test_that("build_pedigree_data adds placeholder parents for missing primary entries", {
+  skip_if_not(local_ggped_dependencies_available(), "The installed ggped package is not available.")
+
   df <- tibble::tibble(
     mouse_id = c("1201", "1202"),
     sex = c("M", "F"),
@@ -23,6 +25,8 @@ test_that("build_pedigree_data adds placeholder parents for missing primary entr
 })
 
 test_that("build_pedigree_data infers sex from sire and dam roles when missing", {
+  skip_if_not(local_ggped_dependencies_available(), "The installed ggped package is not available.")
+
   df <- tibble::tibble(
     mouse_id = c("2001", "2002", "2003"),
     sex = c(NA, NA, "F"),
@@ -72,6 +76,8 @@ test_that("feature_to_numeric maps genotype dosage strings onto 0 to 1 intensity
 })
 
 test_that("build_pedigree_data respects manual canvas overrides", {
+  skip_if_not(local_ggped_dependencies_available(), "The installed ggped package is not available.")
+
   df <- tibble::tibble(
     mouse_id = c("1201", "1202"),
     sex = c("F", "M"),
@@ -100,7 +106,7 @@ test_that("build_pedigree_data respects manual canvas overrides", {
 })
 
 test_that("build_pedigree_feature_scales builds discrete scales with manual overrides", {
-  skip_if_not(local_ggped_dependencies_available(), "Local ggped dependencies are not available.")
+  skip_if_not(local_ggped_dependencies_available(), "The installed ggped package is not available.")
 
   df <- tibble::tibble(
     mouse_id = c("1201", "1202"),
@@ -143,8 +149,8 @@ test_that("build_pedigree_feature_scales builds discrete scales with manual over
   expect_equal(scales$geno_cyb5r4$na.value, "#999999")
 })
 
-test_that("draw_pedigree uses the local ggped plot object and multiline labels", {
-  skip_if_not(local_ggped_dependencies_available(), "Local ggped dependencies are not available.")
+test_that("draw_pedigree uses the installed ggped plot object and multiline labels", {
+  skip_if_not(local_ggped_dependencies_available(), "The installed ggped package is not available.")
 
   df <- tibble::tibble(
     mouse_id = c("1201", "1202"),
@@ -169,6 +175,6 @@ test_that("draw_pedigree uses the local ggped plot object and multiline labels",
   plot_obj <- draw_pedigree(payload)
 
   expect_s3_class(plot_obj, "ggped_plot")
-  expect_equal(attr(plot_obj, "engine_used"), "local_ggped")
+  expect_equal(attr(plot_obj, "engine_used"), "installed_ggped")
   expect_true(any(grepl("1201\nF\n10.0 wk", plot_obj$dat$Name, fixed = TRUE)))
 })

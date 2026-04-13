@@ -417,7 +417,7 @@ build_pedigree_feature_scales <- function(plot_df, feature_catalog, selected_fie
     stop("Choose at least one gene to color before drawing the pedigree.")
   }
   if (length(selected_fields) > 4) {
-    stop("The local ggped renderer supports at most 4 genes per pedigree.")
+    stop("The installed ggped renderer supports at most 4 genes per pedigree.")
   }
 
   ggped_api <- get_local_ggped()
@@ -454,8 +454,24 @@ build_pedigree_feature_scales <- function(plot_df, feature_catalog, selected_fie
 }
 
 local_ggped_dependencies_available <- function() {
-  required <- c("ggplot2", "kinship2", "cli", "gtable")
-  all(vapply(required, requireNamespace, logical(1), quietly = TRUE))
+  required <- c("ggped", "ggplot2", "kinship2")
+  if (!all(vapply(required, requireNamespace, logical(1), quietly = TRUE))) {
+    return(FALSE)
+  }
+
+  desc <- utils::packageDescription("ggped")
+  metadata <- paste(
+    stats::na.omit(c(
+      desc[["RemoteUsername"]],
+      desc[["RemoteRepo"]],
+      desc[["URL"]],
+      desc[["BugReports"]]
+    )),
+    collapse = " "
+  )
+
+  grepl("yuans-cellbio", metadata, fixed = TRUE) &&
+    grepl("ggped_multi_feature", metadata, fixed = TRUE)
 }
 
 local_ggped_state <- local({
@@ -464,77 +480,28 @@ local_ggped_state <- local({
   env
 })
 
-find_local_ggped_path <- function() {
-  candidates <- c(
-    "ggped",
-    file.path(".", "ggped"),
-    file.path("..", "ggped"),
-    file.path("..", "..", "ggped")
-  )
-
-  for (candidate in unique(candidates)) {
-    if (dir.exists(candidate) &&
-      file.exists(file.path(candidate, "DESCRIPTION")) &&
-      dir.exists(file.path(candidate, "R"))) {
-      return(normalizePath(candidate, winslash = "/", mustWork = TRUE))
-    }
-  }
-
-  stop("Could not locate the local ./ggped package folder.")
-}
-
 get_local_ggped <- function() {
   if (!is.null(local_ggped_state$api)) {
     return(local_ggped_state$api)
   }
 
   if (!local_ggped_dependencies_available()) {
-    stop("Local ggped rendering requires ggplot2, kinship2, cli, and gtable.")
+    stop(
+      paste(
+        "Pedigree rendering requires the installed ggped package.",
+        "Run source('setup_project.R') to install yuans-cellbio/ggped_multi_feature."
+      )
+    )
   }
 
-  ggped_dir <- find_local_ggped_path()
-  api_env <- new.env(parent = baseenv())
+  ggped_ns <- asNamespace("ggped")
+  api_env <- new.env(parent = emptyenv())
 
-  bindings <- list(
-    ggplot = ggplot2::ggplot,
-    aes = ggplot2::aes,
-    geom_line = ggplot2::geom_line,
-    geom_segment = ggplot2::geom_segment,
-    geom_text = ggplot2::geom_text,
-    geom_point = ggplot2::geom_point,
-    geom_tile = ggplot2::geom_tile,
-    scale_shape_manual = ggplot2::scale_shape_manual,
-    scale_fill_gradientn = ggplot2::scale_fill_gradientn,
-    scale_fill_manual = ggplot2::scale_fill_manual,
-    guide_colorbar = ggplot2::guide_colorbar,
-    guide_legend = ggplot2::guide_legend,
-    theme_void = ggplot2::theme_void,
-    theme = ggplot2::theme,
-    element_text = ggplot2::element_text,
-    ggproto = ggplot2::ggproto,
-    Geom = ggplot2::Geom,
-    layer = ggplot2::layer,
-    setNames = stats::setNames,
-    gtable = gtable::gtable,
-    gtable_add_grob = gtable::gtable_add_grob,
-    align.pedigree = kinship2::align.pedigree,
-    kinship = kinship2::kinship
-  )
-
-  list2env(bindings, envir = api_env)
-
-  source_files <- c(
-    "segmentation.R",
-    "scale_feature.R",
-    "geom_pedigreepoint.R",
-    "dfalign.pedigree.R",
-    "legend_builder.R",
-    "ggdraw.pedigree.R"
-  )
-
-  for (file_name in source_files) {
-    sys.source(file.path(ggped_dir, "R", file_name), envir = api_env, keep.source = FALSE)
-  }
+  api_env$scale_feature_discrete <- getExportedValue("ggped", "scale_feature_discrete")
+  api_env$dfalign.pedigree <- getExportedValue("ggped", "dfalign.pedigree")
+  api_env$ggdraw.pedigree <- getExportedValue("ggped", "ggdraw.pedigree")
+  api_env$save_ggped <- getExportedValue("ggped", "save_ggped")
+  api_env$.draw_ggped <- get(".draw_ggped", envir = ggped_ns, inherits = FALSE)
 
   local_ggped_state$api <- api_env
   api_env
@@ -691,7 +658,7 @@ draw_pedigree <- function(pedigree_data, color_overrides = list()) {
       plot.margin = ggplot2::margin(12, 18, 12, 18)
     )
 
-  attr(plot_obj, "engine_used") <- "local_ggped"
+  attr(plot_obj, "engine_used") <- "installed_ggped"
   attr(plot_obj, "render_specs") <- specs
   plot_obj
 }

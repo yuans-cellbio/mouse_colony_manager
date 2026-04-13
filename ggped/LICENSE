@@ -1,0 +1,14 @@
+YEAR: 2024
+COPYRIGHT HOLDER: Moritz Lindner (original ggped package)
+
+YEAR: 2026
+COPYRIGHT HOLDER: Shuai Yuan (multi-feature segmentation fork)
+
+This package is free software; you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the
+Free Software Foundation; either version 2 of the License, or (at your
+option) any later version.
+
+The full text of the GPL-2 license is distributed with this package in
+the file COPYING, and is also available at:
+https://www.gnu.org/licenses/old-licenses/gpl-2.0.html

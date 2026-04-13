@@ -156,7 +156,7 @@ create_ui_harness <- function(repo_dir) {
   dir.create(file.path(harness_dir, "data"), recursive = TRUE, showWarnings = FALSE)
 
   copied <- file.copy(
-    from = file.path(repo_dir, c("app.R", "DESCRIPTION", "R", "ggped")),
+    from = file.path(repo_dir, c("app.R", "DESCRIPTION", "R")),
     to = harness_dir,
     recursive = TRUE
   )
@@ -543,7 +543,7 @@ main <- function() {
   set_named_input(app, "pedigree-canvas_width_in", 30, wait_ = FALSE)
   set_named_input(app, "pedigree-canvas_height_in", 16, wait_ = FALSE)
   app$click("pedigree-draw")
-  wait_for_text(app, ".app-status-text", "Pedigree ready with the local ggped renderer.", timeout = 60000)
+  wait_for_text(app, ".app-status-text", "Pedigree ready with the installed ggped renderer.", timeout = 60000)
   wait_for_plot(app, timeout = 60000)
   wait_for_text(app, "#pedigree-subset_table", "I201", timeout = 30000)
   app$get_screenshot(file = file.path(artifacts_dir, "03-pedigree.png"))
