@@ -2,9 +2,10 @@ Package: mousecolony
 Title: Mouse Colony Manager App
 Version: 0.1.0
 Authors@R:
-    person("OpenAI", "Codex", email = "noreply@example.com", role = c("aut", "cre"))
-Description: A Shiny application for importing SoftMouse exports, managing
-    local colony operations state, tracing lineage, and drawing pedigrees.
+    person("Shuai", "Yuan", email = "yuans@pitt.edu", role = c("aut", "cre"), comment = c(ORCID = "0000-0002-9590-6555"))
+Author: Shuai Yuan [aut, cre]
+Maintainer: Shuai Yuan <yuans@pitt.edu>
+Description: A Shiny application for importing SoftMouse exports, managing local colony operations state, tracing lineage, and drawing pedigrees.
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
@@ -16,6 +17,7 @@ Imports:
     RSQLite,
     cli,
     dplyr,
+    ggped,
     gtable,
     ggplot2,
     jsonlite,
@@ -29,4 +31,7 @@ Imports:
     tidyr
 Suggests:
     testthat,
+    shinytest2,
     RColorBrewer
+Remotes:
+    yuans-cellbio/ggped_multi_feature

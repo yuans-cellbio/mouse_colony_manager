@@ -436,6 +436,40 @@ load_current_mouse_from_con <- function(con) {
     dplyr::slice_head(n = current_n)
 }
 
+summarize_active_pairings <- function(pairings) {
+  pairings <- tibble::as_tibble(pairings)
+
+  if (nrow(pairings) == 0) {
+    return(tibble::tibble(
+      mouse_id = character(),
+      active_pairing_role = character(),
+      active_pairing_with = character()
+    ))
+  }
+
+  dplyr::bind_rows(
+    pairings |>
+      dplyr::transmute(
+        mouse_id = normalize_mouse_id(sire_id),
+        active_pairing_role = "sire",
+        active_pairing_with = normalize_mouse_id(dam_id)
+      ),
+    pairings |>
+      dplyr::transmute(
+        mouse_id = normalize_mouse_id(dam_id),
+        active_pairing_role = "dam",
+        active_pairing_with = normalize_mouse_id(sire_id)
+      )
+  ) |>
+    dplyr::filter(!is.na(mouse_id), !is.na(active_pairing_with)) |>
+    dplyr::group_by(mouse_id) |>
+    dplyr::summarise(
+      active_pairing_role = paste(sort(unique(active_pairing_role)), collapse = ", "),
+      active_pairing_with = paste(sort(unique(active_pairing_with)), collapse = ", "),
+      .groups = "drop"
+    )
+}
+
 load_current_colony <- function(db_path = file.path("data", "mouse_colony_manager.sqlite")) {
   con <- connect_colony_db(db_path)
   on.exit(DBI::dbDisconnect(con), add = TRUE)
@@ -452,6 +486,7 @@ load_current_colony <- function(db_path = file.path("data", "mouse_colony_manage
 
   active_pairings <- pairings |>
     dplyr::filter(status %in% c("planned", "active"))
+  active_pairing_summary <- summarize_active_pairings(active_pairings)
 
   current |>
     dplyr::left_join(annotations, by = "mouse_id") |>
@@ -472,15 +507,7 @@ load_current_colony <- function(db_path = file.path("data", "mouse_colony_manage
       experiment_ready = dplyr::coalesce(experiment_ready, FALSE),
       local_flags = to_flag_string(local_flags)
     ) |>
-    dplyr::left_join(
-      active_pairings |>
-        dplyr::transmute(mouse_id = sire_id, active_pairing_role = "sire", active_pairing_with = dam_id) |>
-        dplyr::bind_rows(
-          active_pairings |>
-            dplyr::transmute(mouse_id = dam_id, active_pairing_role = "dam", active_pairing_with = sire_id)
-        ),
-      by = "mouse_id"
-    )
+    dplyr::left_join(active_pairing_summary, by = "mouse_id")
 }
 
 save_annotation <- function(db_path, mouse_id, is_breeder = FALSE, experiment_ready = FALSE,

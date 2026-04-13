@@ -392,7 +392,7 @@ mod_pedigree_ui <- function(id) {
         open = "desktop",
         instruction_card(
           "Drawing behavior",
-          "This page uses your local ggped renderer. Pick a subset source, choose up to 4 recorded genes from that subset, adjust the genotype colors if needed, and click Draw pedigree."
+          "This page uses the installed ggped renderer. Pick a subset source, choose up to 4 recorded genes from that subset, adjust the genotype colors if needed, and click Draw pedigree."
         ),
         shiny::tags$br(),
         shiny::selectInput(ns("source"), "Source subset", choices = c(
@@ -620,7 +620,7 @@ mod_pedigree_server <- function(id, data, selected_ids_rv, browser_filtered, lin
         return()
       }
 
-      set_status("Drawing pedigree with the local ggped renderer.", "running")
+      set_status("Drawing pedigree with the installed ggped renderer.", "running")
 
       tryCatch({
         render_overrides <- if (identical(input$canvas_mode, "manual")) {
@@ -657,7 +657,7 @@ mod_pedigree_server <- function(id, data, selected_ids_rv, browser_filtered, lin
         }, once = TRUE)
         set_status(
           paste(
-            "Pedigree ready with the local ggped renderer.",
+            "Pedigree ready with the installed ggped renderer.",
             nrow(payload$data),
             "plot rows were rendered across",
             nrow(payload$feature_map),
