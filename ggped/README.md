@@ -1,10 +1,14 @@
 # ggped v2 — Multi-Feature Segmented Pedigree Symbols
 
+> **This is a fork of [moritzlindner/ggped](https://github.com/moritzlindner/ggped)**
+> by [Moritz Lindner](http://lindnerlab.de), extended with multi-feature
+> segmented pedigree symbol support.
+
 A package to draw pedigree charts using ggplot2 and kinship2, with support for
 **n ≤ 4 features** per individual, each mapped to an independently coloured
 segment of the pedigree symbol.
 
-## Key Changes from v1
+## What this fork adds
 
 - **Multi-feature segments**: Each symbol (square/circle/diamond) is partitioned
   into n equal-area segments using an optimal ray-from-centroid algorithm.
@@ -16,7 +20,10 @@ segment of the pedigree symbol.
 - **Consistent segmentation**: Optimal rotation angle θ is precomputed for all
   shape × n combinations and hardcoded, ensuring identical partitioning across
   all individuals of the same sex.
-- **Clean API break**: The old binary feature system is removed.
+- **Bug fix**: Corrected de-duplication logic that dropped valid drawing positions
+  in multi-mate pedigree layouts.
+
+See [NEWS.md](NEWS.md) for the full changelog.
 
 ## Shapes
 
@@ -37,11 +44,14 @@ segment of the pedigree symbol.
 ## Installation
 
 ```r
-# From local directory:
-devtools::install("/path/to/ggped")
+# Install from this fork:
+if (!requireNamespace("remotes", quietly = TRUE)) {
+  install.packages("remotes")
+}
+remotes::install_github("[YOUR GITHUB USERNAME]/ggped")
 
-# Or source all R files directly:
-for (f in list.files("R", full.names = TRUE, pattern = "\\.R$")) source(f)
+# Or install the original upstream package:
+# remotes::install_github("moritzlindner/ggped")
 ```
 
 ## Quick Start
@@ -107,4 +117,10 @@ Saves a ggped plot (handles custom legend grobs correctly).
 
 ## License
 
-GPL-2
+GPL-2. See [LICENSE](LICENSE) for details.
+
+## Acknowledgements
+
+This fork is based on the original [ggped](https://github.com/moritzlindner/ggped)
+package by [Moritz Lindner](http://lindnerlab.de). The original package provides
+the core pedigree layout engine (`dfalign.pedigree`) and ggplot2 integration.

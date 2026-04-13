@@ -1,4 +1,3 @@
-#!/usr/bin/env Rscript
 # ===========================================================================
 # ggped v2 Test Example
 # Demonstrates multi-feature segmented pedigree symbols
