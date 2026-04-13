@@ -14,9 +14,12 @@ Imports:
     DT,
     DBI,
     RSQLite,
+    cli,
     dplyr,
+    gtable,
     ggplot2,
     jsonlite,
+    kinship2,
     openxlsx,
     plotly,
     purrr,
@@ -26,7 +29,4 @@ Imports:
     tidyr
 Suggests:
     testthat,
-    ggped,
-    ggpedigree,
-    kinship2,
     RColorBrewer

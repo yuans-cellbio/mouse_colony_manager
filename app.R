@@ -1,7 +1,7 @@
 required_packages <- c(
   "shiny", "bslib", "DT", "DBI", "RSQLite", "dplyr", "ggplot2",
   "jsonlite", "openxlsx", "plotly", "purrr", "readr", "stringr",
-  "tibble", "tidyr"
+  "tibble", "tidyr", "cli", "gtable", "kinship2"
 )
 
 missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]

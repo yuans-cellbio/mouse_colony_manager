@@ -1,6 +1,14 @@
 pedigree_feature_columns <- function(df) {
-  base_fields <- c("alive", "is_breeder", "experiment_ready")
-  unique(c(genotype_column_names(df), base_fields))
+  genotype_column_names(df)
+}
+
+empty_pedigree_feature_catalog <- function() {
+  tibble::tibble(
+    source_field = character(),
+    display_name = character(),
+    values = list(),
+    base_color = character()
+  )
 }
 
 count_label_lines <- function(labels) {
@@ -78,9 +86,9 @@ compute_pedigree_render_specs <- function(df) {
   label_lines <- count_label_lines(df$label %||% df$mouse_id)
   max_label_lines <- max(label_lines, na.rm = TRUE)
 
-  width_in <- max(14, min(60, 8 + leaf_count * 0.72 + max_label_lines * 0.9))
-  height_in <- max(10, min(42, 4 + generation_span * 2.6 + max_label_lines * 0.4))
-  ped_width <- max(15, min(80, leaf_count * 0.9 + 6))
+  width_in <- max(14, min(84, 8 + leaf_count * 0.72 + max_label_lines * 0.9))
+  height_in <- max(10, min(48, 4 + generation_span * 2.6 + max_label_lines * 0.4))
+  ped_width <- max(15, min(100, leaf_count * 0.9 + 6))
 
   list(
     node_count = nrow(df),
@@ -152,88 +160,57 @@ infer_pedigree_feature_color <- function(feature_name = NULL, feature_values = N
     return("violet")
   }
 
-  if (grepl("alive|breeder|experiment", feature_name)) {
-    return("#2A6F63")
-  }
-
   "#2A6F63"
 }
 
-build_pedigree_feature_style <- function(feature_name = NULL, feature_values = NULL, background_hex = "#FFFFFF") {
-  if (is.null(feature_name)) {
-    return(NULL)
+subset_pedigree_source_rows <- function(df, mouse_ids) {
+  mouse_ids <- normalize_mouse_id(mouse_ids)
+  mouse_ids <- unique(stats::na.omit(mouse_ids))
+
+  if (length(mouse_ids) == 0) {
+    return(tibble::as_tibble(df)[0, , drop = FALSE])
   }
 
-  base_color <- infer_pedigree_feature_color(feature_name = feature_name, feature_values = feature_values)
-  list(
-    feature_name = feature_name,
-    legend_title = pretty_pedigree_feature_label(feature_name),
-    base_color = base_color,
-    low_color = background_hex,
-    mid_color = blend_hex_with_background(base_color, alpha = 0.5, background_hex = background_hex),
-    high_color = blend_hex_with_background(base_color, alpha = 1, background_hex = background_hex)
-  )
+  tibble::as_tibble(df) |>
+    dplyr::filter(mouse_id %in% mouse_ids) |>
+    dplyr::distinct(mouse_id, .keep_all = TRUE)
 }
 
-build_pedigree_feature_map <- function(df, feature_fields = character(0)) {
-  usable_feature_fields <- intersect(feature_fields, names(df))
+pedigree_available_features <- function(df, mouse_ids = NULL) {
+  df <- tibble::as_tibble(df)
 
-  if (length(usable_feature_fields) == 0) {
-    return(tibble::tibble(
-      source_field = "feature_alive",
-      numeric_field = "feature_alive",
-      display_name = "alive",
-      base_color = infer_pedigree_feature_color("feature_alive", !df$alive)
-    ))
+  if (!is.null(mouse_ids)) {
+    df <- subset_pedigree_source_rows(df, mouse_ids)
   }
 
-  display_names <- make.unique(vapply(usable_feature_fields, pretty_pedigree_feature_label, character(1)), sep = " ")
-  base_colors <- purrr::map_chr(
-    usable_feature_fields,
-    ~ infer_pedigree_feature_color(feature_name = .x, feature_values = df[[.x]])
-  )
+  if (nrow(df) == 0) {
+    return(empty_pedigree_feature_catalog())
+  }
+
+  feature_cols <- pedigree_feature_columns(df)
+  if (length(feature_cols) == 0) {
+    return(empty_pedigree_feature_catalog())
+  }
+
+  available_cols <- feature_cols[vapply(feature_cols, function(col) {
+    any(!is.na(trim_na(df[[col]])))
+  }, logical(1))]
+
+  if (length(available_cols) == 0) {
+    return(empty_pedigree_feature_catalog())
+  }
+
+  display_names <- make.unique(vapply(available_cols, pretty_pedigree_feature_label, character(1)), sep = " ")
 
   tibble::tibble(
-    source_field = usable_feature_fields,
-    numeric_field = paste0(usable_feature_fields, "_num"),
+    source_field = available_cols,
     display_name = display_names,
-    base_color = base_colors
-  )
-}
-
-build_pedigree_plot_config <- function(pedigree_data) {
-  specs <- pedigree_data$render_specs %||% compute_pedigree_render_specs(pedigree_data$data)
-  dense_labels <- specs$max_label_lines >= 4 || specs$node_count >= 40
-  feature_style <- pedigree_data$feature_style %||% NULL
-
-  list(
-    plot_title = "Mouse pedigree",
-    label_include = TRUE,
-    label_column = "label",
-    label_method = "geom_text",
-    label_text_size = if (dense_labels) 3.0 else 3.2,
-    label_nudge_y = 0.18 + min(0.18, 0.025 * specs$max_label_lines),
-    label_nudge_x = 0,
-    label_text_angle = 0,
-    label_scale_by_pedigree = FALSE,
-    point_size = if (specs$node_count >= 80) 6.4 else 7.2,
-    point_scale_by_pedigree = FALSE,
-    segment_scale_by_pedigree = FALSE,
-    segment_linewidth = if (specs$node_count >= 80) 0.9 else 1.0,
-    generation_height = 1 + min(0.8, 0.08 * specs$max_label_lines),
-    ped_width = specs$ped_width,
-    sex_color_include = FALSE,
-    status_include = FALSE,
-    overlay_include = FALSE,
-    focal_fill_include = !is.null(feature_style),
-    focal_fill_method = "gradient",
-    focal_fill_low_color = feature_style$low_color %||% "#FFFFFF",
-    focal_fill_mid_color = feature_style$mid_color %||% "#D9E6E2",
-    focal_fill_high_color = feature_style$high_color %||% "#2A6F63",
-    focal_fill_scale_midpoint = 0.5,
-    focal_fill_legend_title = feature_style$legend_title %||% "Feature intensity",
-    focal_fill_na_value = "#D8D2C6",
-    focal_fill_legend_show = TRUE
+    values = lapply(available_cols, function(col) sort(unique(stats::na.omit(trim_na(df[[col]]))))),
+    base_color = vapply(
+      available_cols,
+      function(col) infer_pedigree_feature_color(feature_name = col, feature_values = df[[col]]),
+      character(1)
+    )
   )
 }
 
@@ -339,7 +316,7 @@ normalize_pedigree_sex <- function(df) {
     dam_ids = unique(stats::na.omit(df$dam_id))
   )
 
-  df$sex <- dplyr::coalesce(trim_na(df$sex), inferred, "F")
+  df$sex <- dplyr::coalesce(trim_na(df$sex), inferred, "U")
   df
 }
 
@@ -410,320 +387,321 @@ feature_to_numeric <- function(x) {
   (rank_vals - 1) / (length(levels) - 1)
 }
 
+default_pedigree_discrete_palette <- function(feature_name, values, background_hex = "#FFFFFF") {
+  values <- trim_na(values)
+  values <- unique(stats::na.omit(values))
+
+  if (length(values) == 0) {
+    return(stats::setNames(character(0), character(0)))
+  }
+
+  base_color <- infer_pedigree_feature_color(feature_name = feature_name, feature_values = values)
+  intensities <- feature_to_numeric(values)
+  if (all(is.na(intensities))) {
+    intensities <- seq(0.25, 1, length.out = length(values))
+  }
+
+  colours <- vapply(intensities, function(intensity) {
+    if (is.na(intensity)) {
+      return("#D8D2C6")
+    }
+    blend_hex_with_background(base_color, alpha = intensity, background_hex = background_hex)
+  }, character(1))
+
+  stats::setNames(colours, values)
+}
+
+build_pedigree_feature_scales <- function(plot_df, feature_catalog, selected_fields, color_overrides = list()) {
+  selected_fields <- intersect(selected_fields, feature_catalog$source_field)
+  if (length(selected_fields) == 0) {
+    stop("Choose at least one gene to color before drawing the pedigree.")
+  }
+  if (length(selected_fields) > 4) {
+    stop("The local ggped renderer supports at most 4 genes per pedigree.")
+  }
+
+  ggped_api <- get_local_ggped()
+  scale_specs <- vector("list", length(selected_fields))
+  names(scale_specs) <- selected_fields
+
+  for (field in selected_fields) {
+    row_idx <- match(field, feature_catalog$source_field)
+    if (is.na(row_idx) || !field %in% names(plot_df)) {
+      next
+    }
+
+    values_present <- sort(unique(stats::na.omit(trim_na(plot_df[[field]]))))
+    default_values <- default_pedigree_discrete_palette(field, values_present)
+    override <- color_overrides[[field]] %||% list()
+    override_values <- override$values %||% stats::setNames(character(0), character(0))
+
+    if (length(override_values) > 0) {
+      matched_names <- intersect(names(default_values), names(override_values))
+      default_values[matched_names] <- override_values[matched_names]
+    }
+
+    legend_name <- trim_na(override$name %||% feature_catalog$display_name[[row_idx]]) %||% feature_catalog$display_name[[row_idx]]
+    na_value <- trim_na(override$na.value %||% "#D8D2C6") %||% "#D8D2C6"
+
+    scale_specs[[field]] <- ggped_api$scale_feature_discrete(
+      values = default_values,
+      na.value = na_value,
+      name = legend_name
+    )
+  }
+
+  scale_specs[!vapply(scale_specs, is.null, logical(1))]
+}
+
+local_ggped_dependencies_available <- function() {
+  required <- c("ggplot2", "kinship2", "cli", "gtable")
+  all(vapply(required, requireNamespace, logical(1), quietly = TRUE))
+}
+
+local_ggped_state <- local({
+  env <- new.env(parent = emptyenv())
+  env$api <- NULL
+  env
+})
+
+find_local_ggped_path <- function() {
+  candidates <- c(
+    "ggped",
+    file.path(".", "ggped"),
+    file.path("..", "ggped"),
+    file.path("..", "..", "ggped")
+  )
+
+  for (candidate in unique(candidates)) {
+    if (dir.exists(candidate) &&
+      file.exists(file.path(candidate, "DESCRIPTION")) &&
+      dir.exists(file.path(candidate, "R"))) {
+      return(normalizePath(candidate, winslash = "/", mustWork = TRUE))
+    }
+  }
+
+  stop("Could not locate the local ./ggped package folder.")
+}
+
+get_local_ggped <- function() {
+  if (!is.null(local_ggped_state$api)) {
+    return(local_ggped_state$api)
+  }
+
+  if (!local_ggped_dependencies_available()) {
+    stop("Local ggped rendering requires ggplot2, kinship2, cli, and gtable.")
+  }
+
+  ggped_dir <- find_local_ggped_path()
+  api_env <- new.env(parent = baseenv())
+
+  bindings <- list(
+    ggplot = ggplot2::ggplot,
+    aes = ggplot2::aes,
+    geom_line = ggplot2::geom_line,
+    geom_segment = ggplot2::geom_segment,
+    geom_text = ggplot2::geom_text,
+    geom_point = ggplot2::geom_point,
+    geom_tile = ggplot2::geom_tile,
+    scale_shape_manual = ggplot2::scale_shape_manual,
+    scale_fill_gradientn = ggplot2::scale_fill_gradientn,
+    scale_fill_manual = ggplot2::scale_fill_manual,
+    guide_colorbar = ggplot2::guide_colorbar,
+    guide_legend = ggplot2::guide_legend,
+    theme_void = ggplot2::theme_void,
+    theme = ggplot2::theme,
+    element_text = ggplot2::element_text,
+    ggproto = ggplot2::ggproto,
+    Geom = ggplot2::Geom,
+    layer = ggplot2::layer,
+    setNames = stats::setNames,
+    gtable = gtable::gtable,
+    gtable_add_grob = gtable::gtable_add_grob,
+    align.pedigree = kinship2::align.pedigree,
+    kinship = kinship2::kinship
+  )
+
+  list2env(bindings, envir = api_env)
+
+  source_files <- c(
+    "segmentation.R",
+    "scale_feature.R",
+    "geom_pedigreepoint.R",
+    "dfalign.pedigree.R",
+    "legend_builder.R",
+    "ggdraw.pedigree.R"
+  )
+
+  for (file_name in source_files) {
+    sys.source(file.path(ggped_dir, "R", file_name), envir = api_env, keep.source = FALSE)
+  }
+
+  local_ggped_state$api <- api_env
+  api_env
+}
+
+build_local_ggped_df <- function(source_df, render_specs = NULL) {
+  ggped_api <- get_local_ggped()
+  source_df <- tibble::as_tibble(source_df)
+  render_specs <- render_specs %||% compute_pedigree_render_specs(source_df)
+
+  if (nrow(source_df) == 0) {
+    return(source_df)
+  }
+
+  sex_codes <- dplyr::case_when(
+    source_df$sex %in% c("M", "male", "Male", "1") ~ 1L,
+    source_df$sex %in% c("F", "female", "Female", "2") ~ 2L,
+    TRUE ~ 0L
+  )
+
+  pedigree_obj <- with(
+    source_df,
+    kinship2::pedigree(
+      id = personID,
+      dadid = dadID,
+      momid = momID,
+      sex = sex_codes,
+      status = ifelse(alive %in% TRUE, 0, 1)
+    )
+  )
+
+  aligned <- ggped_api$dfalign.pedigree(
+    ped = pedigree_obj,
+    width = max(10, round(render_specs$ped_width)),
+    packed = TRUE,
+    align = TRUE
+  ) |>
+    dplyr::rename(
+      aligned_name = Name,
+      aligned_sex = sex,
+      aligned_status = status
+    )
+
+  source_meta <- source_df |>
+    dplyr::rename(status_text = status)
+
+  aligned |>
+    dplyr::left_join(source_meta, by = dplyr::join_by(aligned_name == personID)) |>
+    dplyr::mutate(
+      Name = dplyr::coalesce(label, aligned_name),
+      sex = dplyr::coalesce(
+        normalize_sex(sex),
+        dplyr::case_when(
+          aligned_sex %in% c(1, "1", "M", "male", "Male") ~ "M",
+          aligned_sex %in% c(2, "2", "F", "female", "Female") ~ "F",
+          TRUE ~ "U"
+        )
+      ),
+      status = ifelse(alive %in% TRUE, 0, 1),
+      adopted = FALSE,
+      pregnancy = FALSE
+    )
+}
+
 build_pedigree_data <- function(df, mouse_ids, label_fields = c("mouse_id", "age_label", "raw_genotype"),
                                 feature_fields = character(0), render_overrides = NULL) {
-  mouse_ids <- normalize_mouse_id(mouse_ids)
-  mouse_ids <- unique(stats::na.omit(mouse_ids))
-  subset_df <- tibble::as_tibble(df) |>
-    dplyr::filter(mouse_id %in% mouse_ids) |>
-    dplyr::distinct(mouse_id, .keep_all = TRUE)
+  source_rows <- subset_pedigree_source_rows(df, mouse_ids)
 
-  if (nrow(subset_df) == 0) {
+  if (nrow(source_rows) == 0) {
     return(list(
-      data = subset_df,
+      data = source_rows,
+      source_data = source_rows,
       feature_fields = character(0),
       label_fields = label_fields,
-      render_specs = apply_pedigree_render_overrides(compute_pedigree_render_specs(subset_df), render_overrides),
-      feature_style = NULL
+      render_specs = apply_pedigree_render_overrides(compute_pedigree_render_specs(source_rows), render_overrides),
+      feature_map = empty_pedigree_feature_catalog()
     ))
   }
 
-  subset_df <- subset_df |>
+  source_rows <- source_rows |>
     add_placeholder_parents() |>
-    normalize_pedigree_sex()
-
-  subset_df <- subset_df |>
+    normalize_pedigree_sex() |>
     dplyr::mutate(
       famID = 1L,
       personID = mouse_id,
       momID = dam_id,
       dadID = sire_id,
       spouseID = mate_id,
-      status_flag = ifelse(alive %in% TRUE, 0, 1),
-      label = build_pedigree_label(subset_df, label_fields)
+      status_flag = ifelse(alive %in% TRUE, 0, 1)
     )
 
-  render_specs <- compute_pedigree_render_specs(subset_df)
-  feature_map <- build_pedigree_feature_map(subset_df, feature_fields = feature_fields)
+  source_rows$label <- build_pedigree_label(source_rows, label_fields)
 
-  for (idx in seq_len(nrow(feature_map))) {
-    source_field <- feature_map$source_field[[idx]]
-    numeric_field <- feature_map$numeric_field[[idx]]
-
-    if (identical(source_field, "feature_alive")) {
-      subset_df[[numeric_field]] <- feature_to_numeric(!subset_df$alive)
-    } else {
-      subset_df[[numeric_field]] <- feature_to_numeric(subset_df[[source_field]])
-    }
-  }
-
-  feature_style <- if (nrow(feature_map) == 0) {
-    NULL
-  } else {
-    feature_values <- if (identical(feature_map$source_field[[1]], "feature_alive")) !subset_df$alive else subset_df[[feature_map$source_field[[1]]]]
-    style <- build_pedigree_feature_style(feature_map$source_field[[1]], feature_values)
-    style$legend_title <- feature_map$display_name[[1]]
-    style
-  }
-
+  render_specs <- compute_pedigree_render_specs(source_rows)
   render_specs <- apply_pedigree_render_overrides(render_specs, render_overrides)
 
+  available_features <- pedigree_available_features(source_rows)
+  selected_features <- intersect(feature_fields, available_features$source_field)
+  feature_map <- if (length(selected_features) == 0) {
+    empty_pedigree_feature_catalog()
+  } else {
+    available_features[match(selected_features, available_features$source_field), , drop = FALSE]
+  }
+
+  plot_df <- build_local_ggped_df(source_rows, render_specs = render_specs)
+
   list(
-    data = subset_df,
-    feature_fields = feature_map$numeric_field,
+    data = plot_df,
+    source_data = source_rows,
+    feature_fields = selected_features,
     label_fields = label_fields,
     render_specs = render_specs,
-    feature_style = feature_style,
     feature_map = feature_map
   )
 }
 
-legacy_pedigree_dependencies_available <- function() {
-  all(vapply(
-    c("ggped", "kinship2", "RColorBrewer", "tidyr"),
-    requireNamespace,
-    logical(1),
-    quietly = TRUE
-  ))
-}
+draw_pedigree <- function(pedigree_data, color_overrides = list()) {
+  ggped_api <- get_local_ggped()
+  plot_df <- pedigree_data$data
 
-legacy_pedigree_state <- local({
-  env <- new.env(parent = emptyenv())
-  env$helpers <- NULL
-  env
-})
+  if (nrow(plot_df) < 2) {
+    stop("Pedigree drawing requires at least two related entries after placeholder expansion.")
+  }
 
-find_legacy_pedigree_helper_path <- function() {
-  candidates <- c(
-    file.path("helper_functions", "helper_functions.R"),
-    file.path("..", "helper_functions", "helper_functions.R"),
-    file.path("..", "..", "helper_functions", "helper_functions.R")
+  feature_scales <- build_pedigree_feature_scales(
+    plot_df = plot_df,
+    feature_catalog = pedigree_data$feature_map %||% empty_pedigree_feature_catalog(),
+    selected_fields = pedigree_data$feature_fields %||% character(0),
+    color_overrides = color_overrides
   )
 
-  existing <- candidates[file.exists(candidates)]
-  if (length(existing) == 0) {
-    stop("Could not locate helper_functions/helper_functions.R for the legacy pedigree renderer.")
-  }
-
-  normalizePath(existing[[1]], winslash = "/", mustWork = TRUE)
-}
-
-get_legacy_pedigree_helpers <- function() {
-  if (!is.null(legacy_pedigree_state$helpers)) {
-    return(legacy_pedigree_state$helpers)
-  }
-
-  if (!legacy_pedigree_dependencies_available()) {
-    stop("Legacy pedigree rendering requires ggped, kinship2, RColorBrewer, and tidyr.")
-  }
-
-  helper_env <- new.env(parent = baseenv())
-
-  bindings <- list(
-    ggproto = ggplot2::ggproto,
-    Geom = ggplot2::Geom,
-    aes = ggplot2::aes,
-    layer = ggplot2::layer,
-    discrete_scale = ggplot2::discrete_scale,
-    ggplot = ggplot2::ggplot,
-    geom_line = ggplot2::geom_line,
-    geom_segment = ggplot2::geom_segment,
-    geom_text = ggplot2::geom_text,
-    scale_colour_manual = ggplot2::scale_colour_manual,
-    theme_void = ggplot2::theme_void,
-    theme_classic = ggplot2::theme_classic,
-    theme = ggplot2::theme,
-    element_blank = ggplot2::element_blank,
-    element_text = ggplot2::element_text,
-    element_line = ggplot2::element_line,
-    `%+replace%` = ggplot2::`%+replace%`,
-    brewer.pal = RColorBrewer::brewer.pal,
-    pivot_longer = tidyr::pivot_longer,
-    all_of = tidyselect::all_of,
-    unit = grid::unit,
-    unit.c = grid::unit.c,
-    polygonGrob = grid::polygonGrob,
-    pointsGrob = grid::pointsGrob,
-    textGrob = grid::textGrob,
-    gpar = grid::gpar,
-    gList = grid::gList,
-    col2rgb = grDevices::col2rgb,
-    rgb = grDevices::rgb,
-    align.pedigree = kinship2::align.pedigree,
-    kinship = kinship2::kinship
-  )
-
-  list2env(bindings, envir = helper_env)
-  sys.source(find_legacy_pedigree_helper_path(), envir = helper_env, keep.source = FALSE)
-  legacy_pedigree_state$helpers <- helper_env
-  helper_env
-}
-
-build_legacy_pedigree_df <- function(pedigree_data) {
-  helpers <- get_legacy_pedigree_helpers()
-  ped <- pedigree_data$data
-  specs <- pedigree_data$render_specs %||% compute_pedigree_render_specs(ped)
-
-  pedigree_obj <- with(
-    ped,
-    kinship2::pedigree(
-      id = personID,
-      dadid = dadID,
-      momid = momID,
-      sex = sex,
-      status = ifelse(alive %in% TRUE, 0, 1)
-    )
-  )
-
-  aligned <- helpers$dfalign.pedigree(pedigree_obj, width = max(10, round(specs$ped_width)))
-  aligned <- aligned |>
-    dplyr::rename(aligned_sex = sex, aligned_status = status)
-
-  merged <- aligned |>
-    dplyr::left_join(
-      ped |>
-        dplyr::select(-status_flag),
-      by = dplyr::join_by(Name == personID)
-    ) |>
-    dplyr::mutate(
-      legacy_sex_label = stringr::str_to_upper(
-        dplyr::coalesce(
-          trim_na(as.character(sex)),
-          trim_na(as.character(aligned_sex))
-        )
-      ),
-      sex = dplyr::case_when(
-        legacy_sex_label %in% c("M", "MALE", "1", "22") ~ 22,
-        legacy_sex_label %in% c("F", "FEMALE", "2", "21") ~ 21,
-        TRUE ~ 0
-      ),
-      status = as.factor(ifelse(alive %in% TRUE, 0, 1)),
-      Name = dplyr::coalesce(label, Name)
-    )
-
-  feature_map <- pedigree_data$feature_map %||% tibble::tibble()
-  for (idx in seq_len(nrow(feature_map))) {
-    merged[[feature_map$display_name[[idx]]]] <- merged[[feature_map$numeric_field[[idx]]]]
-  }
-
-  merged
-}
-
-draw_pedigree_ggpedigree <- function(pedigree_data, interactive = FALSE) {
-  if (!requireNamespace("ggpedigree", quietly = TRUE)) {
-    stop("The ggpedigree package is not installed.")
-  }
-
-  ped <- pedigree_data$data
-  fill_col <- pedigree_data$feature_fields[[1]] %||% NULL
-  tooltip_cols <- unique(c("personID", "label", "raw_genotype", "age_label", "mouse_line", "generation"))
-  tooltip_cols <- intersect(tooltip_cols, names(ped))
-  config <- build_pedigree_plot_config(pedigree_data)
-
-  plot <- ggpedigree::ggPedigree(
-    ped = ped,
-    famID = "famID",
-    personID = "personID",
-    momID = "momID",
-    dadID = "dadID",
-    spouseID = "spouseID",
-    focal_fill_column = fill_col,
-    tooltip_columns = tooltip_cols,
-    interactive = interactive,
-    code_male = "M",
-    config = config,
-    sexVar = "sex"
-  )
-
-  attr(plot, "engine_used") <- "ggpedigree"
-  attr(plot, "render_specs") <- pedigree_data$render_specs %||% NULL
-  plot
-}
-
-draw_pedigree_legacy <- function(pedigree_data) {
-  helpers <- get_legacy_pedigree_helpers()
-  specs <- pedigree_data$render_specs %||% compute_pedigree_render_specs(pedigree_data$data)
-  feature_map <- pedigree_data$feature_map %||% tibble::tibble()
-  legacy_df <- build_legacy_pedigree_df(pedigree_data)
-
-  feature_names <- feature_map$display_name
-  feature_colors <- if (length(feature_names) == 0) {
-    c("alive" = "#2A6F63")
-  } else {
-    stats::setNames(feature_map$base_color, feature_names)
-  }
-
-  text_size <- dplyr::case_when(
-    specs$node_count >= 100 ~ 4.8,
-    specs$node_count >= 60 ~ 5.4,
-    specs$node_count >= 30 ~ 6.0,
-    TRUE ~ 6.6
-  )
-  label_offset_size <- dplyr::case_when(
-    specs$node_count >= 100 ~ 5.5,
-    specs$node_count >= 60 ~ 6.0,
-    specs$node_count >= 30 ~ 6.5,
+  specs <- pedigree_data$render_specs %||% compute_pedigree_render_specs(pedigree_data$source_data %||% plot_df)
+  point_size <- dplyr::case_when(
+    specs$node_count >= 180 ~ 4.8,
+    specs$node_count >= 120 ~ 5.5,
+    specs$node_count >= 80 ~ 6.0,
     TRUE ~ 7.0
   )
 
-  plot <- helpers$ggdraw.pedigree1(
-    legacy_df,
-    features = names(feature_colors),
+  plot_obj <- ggped_api$ggdraw.pedigree(
+    dat = plot_df,
+    features = feature_scales,
+    plot.names = TRUE,
     plot.kinship.label = FALSE,
-    show.legend = TRUE,
-    shape.size = label_offset_size,
-    text.size = text_size
-  ) +
-    helpers$scale_feature.name_manual(
-      values = unname(feature_colors),
-      main.feature.black = FALSE,
-      name = "Features"
-    ) +
-    ggplot2::coord_cartesian(clip = "off") +
+    allow.repeated = TRUE,
+    width = max(10, round(specs$ped_width)),
+    size = point_size
+  )
+
+  plot_obj$plot <- plot_obj$plot +
     ggplot2::theme(
       plot.background = ggplot2::element_rect(fill = "white", colour = NA),
       panel.background = ggplot2::element_rect(fill = "white", colour = NA),
-      plot.margin = ggplot2::margin(10, 40, 20, 20),
-      legend.position = "right",
-      legend.box = "vertical",
-      legend.background = ggplot2::element_rect(fill = "white", colour = NA),
-      legend.key = ggplot2::element_rect(fill = "white", colour = NA),
-      legend.title = ggplot2::element_text(colour = "black"),
-      legend.text = ggplot2::element_text(colour = "black")
+      plot.margin = ggplot2::margin(12, 18, 12, 18)
     )
 
-  attr(plot, "engine_used") <- "legacy"
-  attr(plot, "render_specs") <- specs
-  plot
+  attr(plot_obj, "engine_used") <- "local_ggped"
+  attr(plot_obj, "render_specs") <- specs
+  plot_obj
 }
 
-resolve_pedigree_engine <- function(engine = c("auto", "legacy", "ggpedigree"), pedigree_data = NULL) {
-  engine <- match.arg(engine)
-
-  if (engine == "auto") {
-    feature_count <- nrow(pedigree_data$feature_map %||% tibble::tibble())
-    if (feature_count > 1 && legacy_pedigree_dependencies_available()) {
-      return("legacy")
-    }
-    if (requireNamespace("ggpedigree", quietly = TRUE)) {
-      return("ggpedigree")
-    }
-    if (legacy_pedigree_dependencies_available()) {
-      return("legacy")
-    }
-    stop("No pedigree renderer is available. Install ggpedigree or ggped + kinship2.")
-  }
-
-  engine
+render_pedigree_plot <- function(plot_obj) {
+  ggped_api <- get_local_ggped()
+  ggped_api$.draw_ggped(plot_obj)
 }
 
-draw_pedigree <- function(pedigree_data, interactive = FALSE, engine = c("auto", "legacy", "ggpedigree")) {
-  engine <- resolve_pedigree_engine(engine = engine, pedigree_data = pedigree_data)
-
-  switch(
-    engine,
-    legacy = draw_pedigree_legacy(pedigree_data),
-    ggpedigree = draw_pedigree_ggpedigree(pedigree_data, interactive = interactive),
-    stop("Unsupported pedigree engine.")
-  )
+save_pedigree_plot <- function(plot_obj, filename, width, height, dpi = 300) {
+  ggped_api <- get_local_ggped()
+  ggped_api$save_ggped(plot_obj, filename = filename, width = width, height = height, dpi = dpi)
 }
