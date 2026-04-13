@@ -63,7 +63,11 @@ mod_lineage_server <- function(id, data, selected_ids_rv, lineage_result_rv, set
       display_rows <- result$rows
 
       if (nrow(display_rows) == 0) {
-        display_rows <- empty_lineage_rows(data())
+        display_rows <- tibble::tibble(
+          mouse_id = character(), lineage_roles = character(), lineage_depth = integer(),
+          sex = character(), age_label = character(), alive = logical(),
+          raw_genotype = character(), mouse_line = character(), generation = character()
+        )
       }
 
       DT::datatable(

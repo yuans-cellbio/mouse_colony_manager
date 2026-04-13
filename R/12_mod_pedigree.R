@@ -88,283 +88,100 @@ pedigree_viewer_ui_assets <- function() {
         }
 
         function findContentSize(root) {
-          var plot = root.querySelector('.shiny-plot-output');
-          if (!plot) {
-            return { width: 0, height: 0 };
+          var state = root.__pedigreeViewerState;
+          if (state && state.contentWidth > 0 && state.contentHeight > 0) {
+            return { width: state.contentWidth, height: state.contentHeight };
           }
+
+          var plot = root.querySelector('.shiny-plot-output');
+          if (!plot) return { width: 0, height: 0 };
 
           var inner = plot.querySelector('img, canvas');
-          var width = 0;
-          var height = 0;
-
-          width = plot.clientWidth || plot.offsetWidth || 0;
-          height = plot.clientHeight || plot.offsetHeight || 0;
-
-          if ((!width || !height) && inner) {
-            var rect = inner.getBoundingClientRect();
-            width = rect.width || inner.clientWidth || inner.width || 0;
-            height = rect.height || inner.clientHeight || inner.height || 0;
-          }
-
-          if ((!width || !height) && plot.style) {
-            width = width || parseFloat(plot.style.width) || 0;
-            height = height || parseFloat(plot.style.height) || 0;
-          }
-
-          return { width: width, height: height };
-        }
-
-        function fallbackBounds(root) {
-          var size = findContentSize(root);
-          return {
-            left: 0,
-            top: 0,
-            width: size.width || 0,
-            height: size.height || 0
-          };
-        }
-
-        function extractVisibleBounds(pixelData, sourceWidth, sourceHeight, displayWidth, displayHeight) {
-          var minX = sourceWidth;
-          var minY = sourceHeight;
-          var maxX = -1;
-          var maxY = -1;
-
-          for (var y = 0; y < sourceHeight; y += 1) {
-            for (var x = 0; x < sourceWidth; x += 1) {
-              var idx = (y * sourceWidth + x) * 4;
-              var r = pixelData[idx];
-              var g = pixelData[idx + 1];
-              var b = pixelData[idx + 2];
-              var a = pixelData[idx + 3];
-
-              if (a <= 8) {
-                continue;
+          if (inner) {
+            if (inner.tagName === 'IMG') {
+              if (inner.complete && inner.naturalWidth > 0) {
+                return { width: inner.clientWidth || inner.naturalWidth, height: inner.clientHeight || inner.naturalHeight };
               }
-
-              if (r >= 248 && g >= 248 && b >= 248) {
-                continue;
+              var rect = inner.getBoundingClientRect();
+              if (rect.width > 0 && rect.height > 0) {
+                return { width: rect.width, height: rect.height };
               }
-
-              if (x < minX) minX = x;
-              if (y < minY) minY = y;
-              if (x > maxX) maxX = x;
-              if (y > maxY) maxY = y;
+            } else {
+              return { width: inner.width || inner.clientWidth || 0, height: inner.height || inner.clientHeight || 0 };
             }
           }
 
-          if (maxX < minX || maxY < minY) {
-            return {
-              left: 0,
-              top: 0,
-              width: displayWidth,
-              height: displayHeight
-            };
-          }
-
-          var scaleX = displayWidth / sourceWidth;
-          var scaleY = displayHeight / sourceHeight;
-
-          return {
-            left: minX * scaleX,
-            top: minY * scaleY,
-            width: (maxX - minX + 1) * scaleX,
-            height: (maxY - minY + 1) * scaleY
-          };
-        }
-
-        function graphicCacheKey(inner, bounds) {
-          if (!inner) {
-            return null;
-          }
-
-          if (inner.tagName === 'IMG') {
-            return [
-              'img',
-              inner.currentSrc || inner.src || '',
-              inner.naturalWidth || 0,
-              inner.naturalHeight || 0,
-              bounds.width || 0,
-              bounds.height || 0
-            ].join('|');
-          }
-
-          return [
-            'canvas',
-            inner.width || 0,
-            inner.height || 0,
-            bounds.width || 0,
-            bounds.height || 0
-          ].join('|');
-        }
-
-        function refreshVisibleBounds(root, onReady) {
-          var state = root.__pedigreeViewerState;
-          var plot = root.querySelector('.shiny-plot-output');
-          var inner = plot && plot.querySelector('img, canvas');
-          var fallback = fallbackBounds(root);
-
-          if (!state) {
-            return;
-          }
-
-          if (!inner || !fallback.width || !fallback.height) {
-            state.visibleBounds = fallback;
-            if (onReady) {
-              onReady(fallback);
-            }
-            return;
-          }
-
-          var cacheKey = graphicCacheKey(inner, fallback);
-          if (state.visibleBoundsCacheKey === cacheKey && state.visibleBounds) {
-            if (onReady) {
-              onReady(state.visibleBounds);
-            }
-            return;
-          }
-
-          function store(bounds) {
-            state.visibleBounds = bounds;
-            state.visibleBoundsCacheKey = cacheKey;
-            if (onReady) {
-              onReady(bounds);
-            }
-          }
-
-          if (inner.tagName === 'CANVAS') {
-            try {
-              var ctx = inner.getContext('2d', { willReadFrequently: true });
-              var canvasData = ctx.getImageData(0, 0, inner.width, inner.height).data;
-              store(extractVisibleBounds(canvasData, inner.width, inner.height, fallback.width, fallback.height));
-            } catch (err) {
-              store(fallback);
-            }
-            return;
-          }
-
-          if (!inner.complete || !inner.naturalWidth || !inner.naturalHeight) {
-            inner.addEventListener('load', function handleLoad() {
-              refreshVisibleBounds(root, onReady);
-            }, { once: true });
-            return;
-          }
-
-          try {
-            var scratch = document.createElement('canvas');
-            scratch.width = inner.naturalWidth;
-            scratch.height = inner.naturalHeight;
-            var scratchCtx = scratch.getContext('2d', { willReadFrequently: true });
-            scratchCtx.drawImage(inner, 0, 0);
-            var imageData = scratchCtx.getImageData(0, 0, scratch.width, scratch.height).data;
-            store(extractVisibleBounds(imageData, scratch.width, scratch.height, fallback.width, fallback.height));
-          } catch (err) {
-            store(fallback);
-          }
+          var pw = plot.clientWidth || plot.offsetWidth || parseFloat(plot.style.width) || 0;
+          var ph = plot.clientHeight || plot.offsetHeight || parseFloat(plot.style.height) || 0;
+          return { width: pw, height: ph };
         }
 
         function renderTransform(root) {
           var state = root.__pedigreeViewerState;
           var stage = root.querySelector('.pedigree-viewer-stage');
-          if (!state || !stage) {
-            return;
-          }
+          if (!state || !stage) return;
 
           stage.style.transform = 'translate3d(' + state.x + 'px, ' + state.y + 'px, 0) scale(' + state.scale + ')';
 
           var readout = root.querySelector('.pedigree-zoom-readout');
-          if (readout) {
-            readout.textContent = Math.round(state.scale * 100) + '%';
-          }
-
+          if (readout) readout.textContent = Math.round(state.scale * 100) + '%';
           state.renderQueued = false;
         }
 
         function requestRender(root) {
           var state = root.__pedigreeViewerState;
-          if (!state) {
-            return;
-          }
-
-          if (state.renderQueued) {
-            return;
-          }
-
+          if (!state || state.renderQueued) return;
           state.renderQueued = true;
-          window.requestAnimationFrame(function() {
-            renderTransform(root);
-          });
-        }
-
-        function centerOffsets(viewportWidth, viewportHeight, contentWidth, contentHeight, scale) {
-          return {
-            x: (viewportWidth - contentWidth * scale) / 2,
-            y: (viewportHeight - contentHeight * scale) / 2
-          };
-        }
-
-        function centerAtScale(root, scale, mode, bounds) {
-          var state = root.__pedigreeViewerState;
-          var viewport = root.querySelector('.pedigree-viewer-viewport');
-          bounds = bounds || fallbackBounds(root);
-
-          if (!state || !viewport || !bounds.width || !bounds.height) {
-            return;
-          }
-
-          scale = clamp(scale, state.minScale, state.maxScale);
-          if (!isFinite(scale) || scale <= 0) {
-            scale = 1;
-          }
-
-          state.scale = scale;
-          var offsets = centerOffsets(viewport.clientWidth || 1, viewport.clientHeight || 1, bounds.width, bounds.height, scale);
-          state.x = offsets.x - bounds.left * scale;
-          state.y = offsets.y - bounds.top * scale;
-          state.mode = mode || state.mode || 'fit';
-          requestRender(root);
+          window.requestAnimationFrame(function() { renderTransform(root); });
         }
 
         function fitToViewport(root) {
           var state = root.__pedigreeViewerState;
           var viewport = root.querySelector('.pedigree-viewer-viewport');
+          if (!state || !viewport) return;
 
-          if (!state || !viewport) {
-            return;
-          }
+          var size = findContentSize(root);
+          if (!size.width || !size.height) return;
 
-          refreshVisibleBounds(root, function(bounds) {
-            if (!bounds || !bounds.width || !bounds.height) {
-              return;
-            }
+          var vw = viewport.clientWidth || 1;
+          var vh = viewport.clientHeight || 1;
+          var fitScale = clamp(
+            Math.min(vw / size.width, vh / size.height),
+            state.minScale, state.maxScale
+          );
 
-            var viewportWidth = viewport.clientWidth || 1;
-            var viewportHeight = viewport.clientHeight || 1;
-            var fitScale = Math.min(viewportWidth / bounds.width, viewportHeight / bounds.height);
-
-            centerAtScale(root, fitScale, 'fit', bounds);
-          });
+          state.scale = fitScale;
+          state.x = (vw - size.width * fitScale) / 2;
+          state.y = (vh - size.height * fitScale) / 2;
+          state.mode = 'fit';
+          requestRender(root);
         }
 
         function resetToActualSize(root) {
-          centerAtScale(root, 1, 'actual', fallbackBounds(root));
+          var state = root.__pedigreeViewerState;
+          var viewport = root.querySelector('.pedigree-viewer-viewport');
+          if (!state || !viewport) return;
+
+          var size = findContentSize(root);
+          if (!size.width || !size.height) return;
+
+          state.scale = 1;
+          state.x = ((viewport.clientWidth || 1) - size.width) / 2;
+          state.y = ((viewport.clientHeight || 1) - size.height) / 2;
+          state.mode = 'actual';
+          requestRender(root);
         }
 
         function zoomAt(root, factor, clientX, clientY) {
           var state = root.__pedigreeViewerState;
           var viewport = root.querySelector('.pedigree-viewer-viewport');
-          if (!state || !viewport) {
-            return;
-          }
+          if (!state || !viewport) return;
 
           var rect = viewport.getBoundingClientRect();
           var targetX = typeof clientX === 'number' ? clientX - rect.left : rect.width / 2;
           var targetY = typeof clientY === 'number' ? clientY - rect.top : rect.height / 2;
           var nextScale = clamp(state.scale * factor, state.minScale, state.maxScale);
-
-          if (nextScale === state.scale) {
-            return;
-          }
+          if (nextScale === state.scale) return;
 
           var scaleRatio = nextScale / state.scale;
           state.x = targetX - (targetX - state.x) * scaleRatio;
@@ -374,25 +191,37 @@ pedigree_viewer_ui_assets <- function() {
           requestRender(root);
         }
 
+        function applyCurrentMode(root) {
+          var state = root.__pedigreeViewerState;
+          if (!state) return;
+          window.requestAnimationFrame(function() {
+            if (state.mode === 'fit') {
+              fitToViewport(root);
+            } else if (state.mode === 'actual') {
+              resetToActualSize(root);
+            } else {
+              requestRender(root);
+            }
+          });
+        }
+
+        function waitForImage(root, callback) {
+          var plot = root.querySelector('.shiny-plot-output');
+          if (!plot) return;
+          var inner = plot.querySelector('img');
+          if (inner && !inner.complete) {
+            inner.addEventListener('load', function() { callback(); }, { once: true });
+          } else {
+            callback();
+          }
+        }
+
         function attachPlotObserver(root) {
           var plot = root.querySelector('.shiny-plot-output');
-          if (!plot || root.__pedigreePlotObserver) {
-            return;
-          }
-
-          var rerender = function() {
-            window.requestAnimationFrame(function() {
-              var state = root.__pedigreeViewerState || {};
-              if (state.mode === 'fit') {
-                fitToViewport(root);
-              } else {
-                resetToActualSize(root);
-              }
-            });
-          };
+          if (!plot || root.__pedigreePlotObserver) return;
 
           var observer = new MutationObserver(function() {
-            rerender();
+            waitForImage(root, function() { applyCurrentMode(root); });
           });
 
           observer.observe(plot, {
@@ -405,16 +234,14 @@ pedigree_viewer_ui_assets <- function() {
           root.__pedigreePlotObserver = observer;
         }
 
-        function initPedigreeViewer(rootId) {
+        function initPedigreeViewer(rootId, contentWidth, contentHeight) {
           var root = document.getElementById(rootId);
-          if (!root) {
-            return;
-          }
+          if (!root) return;
 
           if (!root.__pedigreeViewerState) {
             root.__pedigreeViewerState = {
               scale: 1,
-              minScale: 0.1,
+              minScale: 0.05,
               maxScale: 8,
               x: 0,
               y: 0,
@@ -423,16 +250,19 @@ pedigree_viewer_ui_assets <- function() {
               dragOriginX: 0,
               dragOriginY: 0,
               renderQueued: false,
-              visibleBounds: null,
-              visibleBoundsCacheKey: null
+              contentWidth: 0,
+              contentHeight: 0
             };
           }
 
           var state = root.__pedigreeViewerState;
-          var viewport = root.querySelector('.pedigree-viewer-viewport');
-          if (!viewport) {
-            return;
+          state.mode = 'fit';
+          if (contentWidth > 0 && contentHeight > 0) {
+            state.contentWidth = contentWidth;
+            state.contentHeight = contentHeight;
           }
+          var viewport = root.querySelector('.pedigree-viewer-viewport');
+          if (!viewport) return;
 
           if (!root.__pedigreeViewerBound) {
             viewport.addEventListener('wheel', function(event) {
@@ -441,23 +271,17 @@ pedigree_viewer_ui_assets <- function() {
             }, { passive: false });
 
             viewport.addEventListener('pointerdown', function(event) {
-              if (event.button !== 0) {
-                return;
-              }
+              if (event.button !== 0) return;
               event.preventDefault();
               state.dragging = true;
               state.dragOriginX = event.clientX - state.x;
               state.dragOriginY = event.clientY - state.y;
               viewport.classList.add('dragging');
-              if (viewport.setPointerCapture) {
-                viewport.setPointerCapture(event.pointerId);
-              }
+              if (viewport.setPointerCapture) viewport.setPointerCapture(event.pointerId);
             });
 
             viewport.addEventListener('pointermove', function(event) {
-              if (!state.dragging) {
-                return;
-              }
+              if (!state.dragging) return;
               event.preventDefault();
               state.x = event.clientX - state.dragOriginX;
               state.y = event.clientY - state.dragOriginY;
@@ -469,60 +293,42 @@ pedigree_viewer_ui_assets <- function() {
               state.dragging = false;
               viewport.classList.remove('dragging');
               if (event && viewport.releasePointerCapture) {
-                try {
-                  viewport.releasePointerCapture(event.pointerId);
-                } catch (err) {}
+                try { viewport.releasePointerCapture(event.pointerId); } catch (err) {}
               }
             };
 
             viewport.addEventListener('pointerup', stopDragging);
             viewport.addEventListener('pointercancel', stopDragging);
             viewport.addEventListener('pointerleave', function(event) {
-              if (state.dragging) {
-                stopDragging(event);
-              }
+              if (state.dragging) stopDragging(event);
             });
 
             root.addEventListener('click', function(event) {
               var button = event.target.closest('[data-pedigree-action]');
-              if (!button) {
-                return;
-              }
-
+              if (!button) return;
               var action = button.getAttribute('data-pedigree-action');
-              if (action === 'zoom-in') {
-                zoomAt(root, 1.2);
-              } else if (action === 'zoom-out') {
-                zoomAt(root, 1 / 1.2);
-              } else if (action === 'fit') {
-                fitToViewport(root);
-              } else if (action === 'actual') {
-                resetToActualSize(root);
-              }
+              if (action === 'zoom-in') zoomAt(root, 1.2);
+              else if (action === 'zoom-out') zoomAt(root, 1 / 1.2);
+              else if (action === 'fit') fitToViewport(root);
+              else if (action === 'actual') resetToActualSize(root);
             });
 
             window.addEventListener('resize', function() {
-              if (state.mode === 'fit') {
-                fitToViewport(root);
-              } else if (state.mode === 'actual') {
-                resetToActualSize(root);
-              } else {
-                requestRender(root);
-              }
+              applyCurrentMode(root);
             });
 
             root.__pedigreeViewerBound = true;
           }
 
           attachPlotObserver(root);
-          fitToViewport(root);
+          waitForImage(root, function() { fitToViewport(root); });
         }
 
         window.initPedigreeViewer = initPedigreeViewer;
 
         if (window.Shiny && window.Shiny.addCustomMessageHandler) {
           window.Shiny.addCustomMessageHandler('pedigree-viewer-init', function(message) {
-            initPedigreeViewer(message.rootId);
+            initPedigreeViewer(message.rootId, message.contentWidth || 0, message.contentHeight || 0);
           });
         }
       })();
@@ -843,7 +649,11 @@ mod_pedigree_server <- function(id, data, selected_ids_rv, browser_filtered, lin
         shiny::updateNumericInput(session, "canvas_height_in", value = round(payload$render_specs$height_in, 1))
         pedigree_result(list(payload = payload, plot = plot_obj))
         session$onFlushed(function() {
-          session$sendCustomMessage("pedigree-viewer-init", list(rootId = session$ns("viewer_shell")))
+          session$sendCustomMessage("pedigree-viewer-init", list(
+            rootId = session$ns("viewer_shell"),
+            contentWidth = payload$render_specs$plot_width_px,
+            contentHeight = payload$render_specs$plot_height_px
+          ))
         }, once = TRUE)
         set_status(
           paste(
@@ -904,6 +714,12 @@ mod_pedigree_server <- function(id, data, selected_ids_rv, browser_filtered, lin
       result <- pedigree_result()
       shiny::req(result)
       render_pedigree_plot(result$plot)
+    }, width = function() {
+      result <- pedigree_result()
+      if (is.null(result)) 800L else result$payload$render_specs$plot_width_px
+    }, height = function() {
+      result <- pedigree_result()
+      if (is.null(result)) 600L else result$payload$render_specs$plot_height_px
     }, res = 110)
 
     output$subset_table <- DT::renderDT({
@@ -912,7 +728,7 @@ mod_pedigree_server <- function(id, data, selected_ids_rv, browser_filtered, lin
 
       DT::datatable(
         result$payload$data |>
-          dplyr::select(mouse_id = personID, sex, age_label, alive, raw_genotype, mouse_line, generation),
+          dplyr::select(mouse_id, sex, age_label, alive, raw_genotype, mouse_line, generation),
         rownames = FALSE,
         options = list(pageLength = 10, scrollX = TRUE, scrollY = 240)
       )

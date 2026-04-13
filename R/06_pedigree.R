@@ -98,7 +98,7 @@ compute_pedigree_render_specs <- function(df) {
     width_in = width_in,
     height_in = height_in,
     plot_width_px = as.integer(round(width_in * 110)),
-    plot_height_px = as.integer(round(height_in * 90)),
+    plot_height_px = as.integer(round(height_in * 110)),
     ped_width = ped_width,
     parent_count = length(parent_ids)
   )
@@ -122,7 +122,7 @@ apply_pedigree_render_overrides <- function(specs, render_overrides = NULL) {
   specs$width_in <- width_in
   specs$height_in <- height_in
   specs$plot_width_px <- as.integer(round(width_in * 110))
-  specs$plot_height_px <- as.integer(round(height_in * 90))
+  specs$plot_height_px <- as.integer(round(height_in * 110))
   specs
 }
 
