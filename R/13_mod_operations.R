@@ -67,15 +67,20 @@ mod_operations_ui <- function(id) {
 
 mod_operations_server <- function(id, data, metadata, db_path, selected_ids_rv, refresh_data, set_status) {
   shiny::moduleServer(id, function(input, output, session) {
-    shiny::observe({
+    shiny::observeEvent(list(data(), selected_ids_rv()), {
       df <- data()
       selected_mouse <- NULL
       if (nrow(df) > 0) {
+        current_mouse <- trim_na(isolate(input$mouse_id))
         selected_ids <- selected_ids_rv()
-        selected_mouse <- input$mouse_id %||% if (length(selected_ids) > 0) selected_ids[[1]] else NULL
+        selected_mouse <- current_mouse %||% if (length(selected_ids) > 0) selected_ids[[1]] else NULL
+        if (!is.null(selected_mouse) && !selected_mouse %in% df$mouse_id) {
+          selected_mouse <- NULL
+        }
         selected_mouse <- selected_mouse %||% df$mouse_id[[1]]
       }
 
+      shiny::freezeReactiveValue(input, "mouse_id")
       shiny::updateSelectizeInput(
         session,
         "mouse_id",
@@ -83,9 +88,23 @@ mod_operations_server <- function(id, data, metadata, db_path, selected_ids_rv, 
         selected = selected_mouse,
         server = TRUE
       )
-      shiny::updateSelectizeInput(session, "sire_id", choices = df$mouse_id[df$sex == "M"], server = TRUE)
-      shiny::updateSelectizeInput(session, "dam_id", choices = df$mouse_id[df$sex == "F"], server = TRUE)
-    })
+      shiny::freezeReactiveValue(input, "sire_id")
+      shiny::updateSelectizeInput(
+        session,
+        "sire_id",
+        choices = df$mouse_id[df$sex == "M"],
+        selected = trim_na(isolate(input$sire_id)),
+        server = TRUE
+      )
+      shiny::freezeReactiveValue(input, "dam_id")
+      shiny::updateSelectizeInput(
+        session,
+        "dam_id",
+        choices = df$mouse_id[df$sex == "F"],
+        selected = trim_na(isolate(input$dam_id)),
+        server = TRUE
+      )
+    }, ignoreInit = FALSE)
 
     shiny::observeEvent(selected_ids_rv(), {
       selected_ids <- selected_ids_rv()
@@ -102,16 +121,21 @@ mod_operations_server <- function(id, data, metadata, db_path, selected_ids_rv, 
         return()
       }
 
+      reservation_until <- row$reservation_until[[1]]
+      if (length(reservation_until) == 0 || is.na(reservation_until)) {
+        reservation_until <- Sys.Date()
+      }
+
       shiny::updateCheckboxInput(session, "is_breeder", value = isTRUE(row$is_breeder[[1]]))
       shiny::updateCheckboxInput(session, "experiment_ready", value = isTRUE(row$experiment_ready[[1]]))
-      shiny::updateTextInput(session, "cohort_label", value = row$cohort_label[[1]] %||% "")
-      shiny::updateTextInput(session, "local_flags", value = row$local_flags[[1]] %||% "")
-      shiny::updateTextAreaInput(session, "notes", value = row$notes[[1]] %||% "")
-      shiny::updateTextInput(session, "project_name", value = row$reservation_project[[1]] %||% "")
-      shiny::updateTextInput(session, "reserved_by", value = row$reservation_owner[[1]] %||% "")
-      shiny::updateDateInput(session, "reserved_until", value = row$reservation_until[[1]] %||% Sys.Date())
-      shiny::updateSelectInput(session, "reservation_status", selected = row$reservation_status[[1]] %||% "")
-      shiny::updateTextAreaInput(session, "reservation_notes", value = row$reservation_notes[[1]] %||% "")
+      shiny::updateTextInput(session, "cohort_label", value = trim_na(row$cohort_label[[1]]) %||% "")
+      shiny::updateTextInput(session, "local_flags", value = trim_na(row$local_flags[[1]]) %||% "")
+      shiny::updateTextAreaInput(session, "notes", value = trim_na(row$notes[[1]]) %||% "")
+      shiny::updateTextInput(session, "project_name", value = trim_na(row$reservation_project[[1]]) %||% "")
+      shiny::updateTextInput(session, "reserved_by", value = trim_na(row$reservation_owner[[1]]) %||% "")
+      shiny::updateDateInput(session, "reserved_until", value = reservation_until)
+      shiny::updateSelectInput(session, "reservation_status", selected = trim_na(row$reservation_status[[1]]) %||% "")
+      shiny::updateTextAreaInput(session, "reservation_notes", value = trim_na(row$reservation_notes[[1]]) %||% "")
     }, ignoreNULL = FALSE)
 
     shiny::observeEvent(input$save_annotation, {

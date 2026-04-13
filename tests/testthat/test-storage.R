@@ -69,6 +69,62 @@ test_that("fresh SQLite store exposes an empty but fully typed colony schema", {
   expect_true(all(c("preset_name", "preset_json", "updated_at") %in% names(meta$presets)))
 })
 
+test_that("active pairings aggregate rotating partners without duplicating colony rows", {
+  temp_dir <- tempfile("mousecolony-pairings-")
+  dir.create(temp_dir)
+  db_path <- file.path(temp_dir, "colony.sqlite")
+
+  soft <- tibble::tibble(
+    source_type = "softmouse",
+    source_path = "soft.xlsx",
+    source_file = "soft.xlsx",
+    imported_at = as.POSIXct("2026-04-12 10:00:00", tz = "UTC"),
+    mouse_id = c("RM300", "RF301", "RF302", "RF500", "RM501", "RM502"),
+    alt_id = NA_character_,
+    mouse_sid = NA_character_,
+    sex = c("M", "F", "F", "F", "M", "M"),
+    dob = as.Date(c("2025-11-01", "2025-11-05", "2025-11-07", "2025-10-15", "2025-10-20", "2025-10-25")),
+    end_date = as.Date(rep(NA, 6)),
+    end_type = NA_character_,
+    age_source = c("24 wk", "23 wk", "23 wk", "26 wk", "25 wk", "24 wk"),
+    age_days = c(168, 161, 159, 182, 175, 168),
+    age_weeks = c(24, 23, 23, 26, 25, 24),
+    age_label = c("24.0 wk", "23.0 wk", "23.0 wk", "26.0 wk", "25.0 wk", "24.0 wk"),
+    status = "Active",
+    alive = TRUE,
+    raw_genotype = NA_character_,
+    mouse_line = c("OutbredCross", "OutbredCross", "OutbredCross", "RotationDam", "RotationDam", "RotationDam"),
+    generation = "F0",
+    first_gene = NA_character_,
+    second_gene = NA_character_,
+    protocol = NA_character_,
+    sire_id = NA_character_,
+    dam_id = NA_character_,
+    mate_id = NA_character_,
+    source_comment = NA_character_,
+    founder = TRUE
+  )
+
+  con <- connect_colony_db(db_path)
+  on.exit(DBI::dbDisconnect(con), add = TRUE)
+  initialize_colony_db(con)
+  write_snapshot(con, soft, tibble::tibble(), soft, force = TRUE)
+
+  save_pairing(db_path, "RM300", "RF301", status = "active")
+  save_pairing(db_path, "RM300", "RF302", status = "active")
+  save_pairing(db_path, "RM501", "RF500", status = "planned")
+  save_pairing(db_path, "RM502", "RF500", status = "active")
+
+  colony <- load_current_colony(db_path)
+
+  expect_equal(nrow(colony), 6)
+  expect_equal(length(unique(colony$mouse_id)), 6)
+  expect_equal(colony$active_pairing_role[colony$mouse_id == "RM300"], "sire")
+  expect_equal(colony$active_pairing_with[colony$mouse_id == "RM300"], "RF301, RF302")
+  expect_equal(colony$active_pairing_role[colony$mouse_id == "RF500"], "dam")
+  expect_equal(colony$active_pairing_with[colony$mouse_id == "RF500"], "RM501, RM502")
+})
+
 test_that("app server boots cleanly when the working database is missing", {
   temp_dir <- tempfile("mousecolony-app-")
   dir.create(temp_dir)

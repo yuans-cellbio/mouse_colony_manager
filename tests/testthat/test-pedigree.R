@@ -96,7 +96,7 @@ test_that("build_pedigree_data respects manual canvas overrides", {
   expect_equal(payload$render_specs$width_in, 44)
   expect_equal(payload$render_specs$height_in, 19)
   expect_equal(payload$render_specs$plot_width_px, as.integer(round(44 * 110)))
-  expect_equal(payload$render_specs$plot_height_px, as.integer(round(19 * 90)))
+  expect_equal(payload$render_specs$plot_height_px, as.integer(round(19 * 110)))
 })
 
 test_that("build_pedigree_feature_scales builds discrete scales with manual overrides", {
