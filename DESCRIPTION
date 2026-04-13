@@ -17,6 +17,7 @@ Imports:
     RSQLite,
     cli,
     dplyr,
+    ggped,
     gtable,
     ggplot2,
     jsonlite,
@@ -32,3 +33,5 @@ Suggests:
     testthat,
     shinytest2,
     RColorBrewer
+Remotes:
+    yuans-cellbio/ggped_multi_feature

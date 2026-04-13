@@ -347,7 +347,7 @@ test_that("simulated breeding workflows preserve state across import, filters, l
 })
 
 test_that("filtered breeding subsets can be drawn as pedigrees with scenario data", {
-  skip_if_not(local_ggped_dependencies_available(), "Local ggped dependencies are not available.")
+  skip_if_not(local_ggped_dependencies_available(), "The installed ggped package is not available.")
 
   fixture <- create_workflow_fixture()
   seed_workflow_operations(fixture$db_path)
@@ -374,6 +374,6 @@ test_that("filtered breeding subsets can be drawn as pedigrees with scenario dat
   expect_equal(payload$render_specs$plot_width_px, as.integer(round(30 * 110)))
   expect_equal(payload$render_specs$plot_height_px, as.integer(round(16 * 110)))
   expect_s3_class(plot_obj, "ggped_plot")
-  expect_equal(attr(plot_obj, "engine_used"), "local_ggped")
+  expect_equal(attr(plot_obj, "engine_used"), "installed_ggped")
   expect_true(any(grepl("InbredCore", plot_obj$dat$Name, fixed = TRUE)))
 })

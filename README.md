@@ -19,7 +19,7 @@ Mouse Colony Manager is an R Shiny application for maintaining a local, curator-
 2. `Dashboard` gives a quick census view and recent import activity.
 3. `Colony Browser` subsets the colony with combinable filters, saved presets, and CSV export.
 4. `Lineage Trace` walks ancestors and descendants from seed IDs and exports the traced result.
-5. `Pedigree` renders pedigrees from selected subsets with the bundled local `ggped` renderer.
+5. `Pedigree` renders pedigrees from selected subsets with the installed `ggped` renderer from `yuans-cellbio/ggped_multi_feature`.
 6. `Operations` stores local annotations, reservations, and pairing plans without overwriting upstream source data.
 
 ## Quick Start
@@ -38,7 +38,7 @@ Run the setup script from the repository root:
 source("setup_project.R")
 ```
 
-This installs the app and test dependencies, snapshots them with `renv`, and uses the bundled `ggped/` package source for pedigree rendering.
+This installs the app and test dependencies, installs the `ggped` fork from `yuans-cellbio/ggped_multi_feature`, and snapshots everything with `renv`.
 
 ### Launch the App
 
@@ -83,10 +83,10 @@ The browser suite uses `shinytest2` and requires a locally available Chrome or E
 - `app.R` app bootstrap and dependency checks
 - `run_app.R` convenience launcher
 - `R/` Shiny modules, storage logic, lineage code, and pedigree rendering helpers
-- `ggped/` bundled local pedigree renderer package
+- `DESCRIPTION` app metadata plus the GitHub `ggped` dependency declaration
 - `tests/testthat/` unit and integration tests
 - `tests/ui_clickthrough.R` headless browser automation workflow
 
 ## License
 
-The main application is released under the MIT License. The repository also includes a bundled `ggped/` package used for pedigree rendering; see `ggped/DESCRIPTION` for its upstream package metadata.
+The main application is released under the MIT License. Pedigree rendering depends on the GitHub-hosted `ggped` fork at `yuans-cellbio/ggped_multi_feature`, which carries its own upstream package metadata and license.
