@@ -1,7 +1,7 @@
 required_packages <- c(
   "shiny", "bslib", "DT", "DBI", "RSQLite", "dplyr", "ggplot2",
   "jsonlite", "openxlsx", "plotly", "purrr", "readr", "stringr",
-  "tibble", "tidyr", "testthat", "ggped"
+  "tibble", "tidyr", "testthat", "shinytest2"
 )
 
 missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
@@ -20,4 +20,10 @@ if (length(missing_packages) > 0) {
 
 renv::snapshot(prompt = FALSE)
 
-message("Project dependencies are ready. Launch the app with shiny::runApp('.') or source('run_app.R').")
+message(
+  paste(
+    "Project dependencies are ready.",
+    "The repository includes a bundled ./ggped renderer, so no separate ggped install is required.",
+    "Launch the app with shiny::runApp('.') or source('run_app.R')."
+  )
+)
