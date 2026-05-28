@@ -218,6 +218,22 @@ normalize_compare_scalar <- function(x) {
   trim_na(as.character(x))
 }
 
+normalize_compare_vector <- function(x) {
+  if (inherits(x, "Date")) {
+    return(ifelse(is.na(x), NA_character_, format(as.Date(x), "%Y-%m-%d")))
+  }
+
+  if (inherits(x, "POSIXt")) {
+    return(ifelse(
+      is.na(x),
+      NA_character_,
+      format(as.POSIXct(x, tz = "UTC"), "%Y-%m-%d %H:%M:%S", tz = "UTC")
+    ))
+  }
+
+  trim_na(as.character(x))
+}
+
 scalar_is_missing <- function(x) {
   is.na(normalize_compare_scalar(x))
 }
@@ -239,8 +255,19 @@ detect_import_conflicts <- function(softmouse_df, snapshot_df) {
     ))
   }
 
-  overlapping_ids <- intersect(softmouse_df$mouse_id, snapshot_df$mouse_id)
-  if (length(overlapping_ids) == 0) {
+  compare_fields <- merge_conflict_fields()
+  joined <- softmouse_df |>
+    dplyr::select(mouse_id, dplyr::all_of(compare_fields)) |>
+    dplyr::distinct(mouse_id, .keep_all = TRUE) |>
+    dplyr::inner_join(
+      snapshot_df |>
+        dplyr::select(mouse_id, dplyr::all_of(compare_fields)) |>
+        dplyr::distinct(mouse_id, .keep_all = TRUE),
+      by = "mouse_id",
+      suffix = c("_softmouse", "_snapshot")
+    )
+
+  if (nrow(joined) == 0) {
     return(tibble::tibble(
       mouse_id = character(),
       field = character(),
@@ -249,28 +276,21 @@ detect_import_conflicts <- function(softmouse_df, snapshot_df) {
     ))
   }
 
-  soft_lookup <- split(softmouse_df, softmouse_df$mouse_id)
-  snap_lookup <- split(snapshot_df, snapshot_df$mouse_id)
+  purrr::map_dfr(compare_fields, function(field) {
+    soft_values <- normalize_compare_vector(joined[[paste0(field, "_softmouse")]])
+    snap_values <- normalize_compare_vector(joined[[paste0(field, "_snapshot")]])
+    conflict_idx <- !is.na(soft_values) & !is.na(snap_values) & soft_values != snap_values
 
-  purrr::map_dfr(overlapping_ids, function(mouse_id) {
-    soft_row <- soft_lookup[[mouse_id]][1, , drop = FALSE]
-    snap_row <- snap_lookup[[mouse_id]][1, , drop = FALSE]
+    if (!any(conflict_idx)) {
+      return(NULL)
+    }
 
-    purrr::map_dfr(merge_conflict_fields(), function(field) {
-      soft_value <- soft_row[[field]][[1]]
-      snap_value <- snap_row[[field]][[1]]
-
-      if (scalar_is_missing(soft_value) || scalar_is_missing(snap_value) || scalar_values_equal(soft_value, snap_value)) {
-        return(NULL)
-      }
-
-      tibble::tibble(
-        mouse_id = mouse_id,
-        field = field,
-        softmouse_value = normalize_compare_scalar(soft_value),
-        snapshot_value = normalize_compare_scalar(snap_value)
-      )
-    })
+    tibble::tibble(
+      mouse_id = joined$mouse_id[conflict_idx],
+      field = field,
+      softmouse_value = soft_values[conflict_idx],
+      snapshot_value = snap_values[conflict_idx]
+    )
   })
 }
 
@@ -454,19 +474,102 @@ merge_import_sources <- function(softmouse_df, snapshot_df, conflict_resolutions
   }
 
   resolutions <- normalize_conflict_resolutions(conflict_resolutions)
-  all_ids <- sort(unique(stats::na.omit(combined$mouse_id)))
-  soft_lookup <- split(softmouse_df, softmouse_df$mouse_id)
-  snap_lookup <- split(snapshot_df, snapshot_df$mouse_id)
+  record_fields <- unique(c(merge_conflict_fields(), "age_source"))
+  soft_unique <- softmouse_df |>
+    dplyr::filter(!is.na(mouse_id)) |>
+    dplyr::distinct(mouse_id, .keep_all = TRUE)
+  snap_unique <- snapshot_df |>
+    dplyr::filter(!is.na(mouse_id)) |>
+    dplyr::distinct(mouse_id, .keep_all = TRUE)
 
-  merged <- purrr::map_dfr(all_ids, function(mouse_id) {
-    build_merged_mouse_row(
-      mouse_id = mouse_id,
-      soft_row = soft_lookup[[mouse_id]],
-      snapshot_row = snap_lookup[[mouse_id]],
-      resolutions = resolutions,
-      default_conflict_source = default_conflict_source
-    )
-  })
+  joined <- dplyr::full_join(
+    soft_unique,
+    snap_unique,
+    by = "mouse_id",
+    suffix = c("_softmouse", "_snapshot")
+  ) |>
+    dplyr::arrange(mouse_id)
+
+  resolution_lookup <- stats::setNames(
+    resolutions$chosen_source,
+    paste(resolutions$mouse_id, resolutions$field, sep = "\r")
+  )
+
+  value_for <- function(field) {
+    soft_values <- joined[[paste0(field, "_softmouse")]]
+    snap_values <- joined[[paste0(field, "_snapshot")]]
+    soft_compare <- normalize_compare_vector(soft_values)
+    snap_compare <- normalize_compare_vector(snap_values)
+    chosen <- unname(resolution_lookup[paste(joined$mouse_id, field, sep = "\r")])
+    chosen[is.na(chosen)] <- default_conflict_source
+    use_snapshot <- is.na(soft_compare) |
+      (!is.na(snap_compare) & soft_compare != snap_compare & chosen == "local_snapshot")
+    use_snapshot[is.na(use_snapshot)] <- FALSE
+
+    dplyr::if_else(use_snapshot, snap_values, soft_values)
+  }
+
+  paste_sources <- function(left, right) {
+    mapply(function(x, y) {
+      trim_na(paste(stats::na.omit(c(x, y)), collapse = " | "))
+    }, left, right, USE.NAMES = FALSE)
+  }
+
+  max_imported_at <- function(left, right) {
+    left_num <- as.numeric(as.POSIXct(left, tz = "UTC"))
+    right_num <- as.numeric(as.POSIXct(right, tz = "UTC"))
+    max_num <- pmax(left_num, right_num, na.rm = TRUE)
+    max_num[is.infinite(max_num)] <- as.numeric(Sys.time())
+    as.POSIXct(max_num, origin = "1970-01-01", tz = "UTC")
+  }
+
+  values <- stats::setNames(lapply(record_fields, value_for), record_fields)
+  dob <- as.Date(values$dob)
+  end_date <- as.Date(values$end_date)
+  status <- values$status
+  alive <- ifelse(!is.na(end_date), FALSE, !tolower(status %||% "") %in% c("ended", "dead", "euthanized"))
+  age_columns <- compute_age_columns(
+    dob = dob,
+    end_date = end_date,
+    age_source = values$age_source,
+    prefer_age_source = !alive & is.na(end_date)
+  )
+
+  merged <- tibble::tibble(
+    source_type = dplyr::case_when(
+      !is.na(joined$source_type_softmouse) & !is.na(joined$source_type_snapshot) ~ "merged_import",
+      !is.na(joined$source_type_softmouse) ~ "softmouse",
+      !is.na(joined$source_type_snapshot) ~ "local_snapshot",
+      TRUE ~ "merged_import"
+    ),
+    source_path = paste_sources(joined$source_path_softmouse, joined$source_path_snapshot),
+    source_file = paste_sources(joined$source_file_softmouse, joined$source_file_snapshot),
+    imported_at = max_imported_at(joined$imported_at_softmouse, joined$imported_at_snapshot),
+    mouse_id = joined$mouse_id,
+    alt_id = values$alt_id,
+    mouse_sid = values$mouse_sid,
+    sex = values$sex,
+    dob = dob,
+    end_date = end_date,
+    end_type = values$end_type,
+    age_source = values$age_source,
+    age_days = age_columns$age_days,
+    age_weeks = age_columns$age_weeks,
+    age_label = age_columns$age_label,
+    status = status,
+    alive = alive,
+    raw_genotype = values$raw_genotype,
+    mouse_line = values$mouse_line,
+    generation = values$generation,
+    first_gene = values$first_gene,
+    second_gene = values$second_gene,
+    protocol = values$protocol,
+    sire_id = values$sire_id,
+    dam_id = values$dam_id,
+    mate_id = values$mate_id,
+    source_comment = values$source_comment,
+    founder = is.na(values$sire_id) & is.na(values$dam_id)
+  )
 
   add_parsed_genotype_columns(merged)
 }

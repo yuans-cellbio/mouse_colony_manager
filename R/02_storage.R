@@ -168,6 +168,9 @@ initialize_colony_db <- function(con) {
       updated_at TEXT NOT NULL
     )
   ")
+
+  DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_imported_records_import_id ON imported_records(import_id)")
+  DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_imported_records_mouse_id ON imported_records(mouse_id)")
 }
 
 restore_mouse_types <- function(df) {
@@ -371,6 +374,40 @@ seed_annotations_from_census <- function(con, census_path) {
     missing_rows$is_breeder <- as.integer(missing_rows$is_breeder)
     DBI::dbWriteTable(con, "annotations", missing_rows, append = TRUE)
   }
+}
+
+is_softmouse_breeder_status <- function(status) {
+  normalized_status <- tolower(trim_na(status))
+  !is.na(normalized_status) & normalized_status %in% c("mating")
+}
+
+seed_breeder_annotations_from_status <- function(con, current_df) {
+  current_df <- tibble::as_tibble(current_df)
+  if (nrow(current_df) == 0 || !all(c("mouse_id", "status") %in% names(current_df))) {
+    return(invisible(0L))
+  }
+
+  existing <- load_annotations_from_con(con)
+  breeder_rows <- current_df |>
+    dplyr::filter(is_softmouse_breeder_status(status), !mouse_id %in% existing$mouse_id) |>
+    dplyr::transmute(
+      mouse_id = normalize_mouse_id(mouse_id),
+      is_breeder = 1L,
+      experiment_ready = 0L,
+      cohort_label = NA_character_,
+      local_flags = NA_character_,
+      notes = NA_character_,
+      updated_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S", tz = "UTC")
+    ) |>
+    dplyr::filter(!is.na(mouse_id)) |>
+    dplyr::distinct(mouse_id, .keep_all = TRUE)
+
+  if (nrow(breeder_rows) == 0) {
+    return(invisible(0L))
+  }
+
+  DBI::dbWriteTable(con, "annotations", breeder_rows, append = TRUE)
+  invisible(nrow(breeder_rows))
 }
 
 load_reservations_from_con <- function(con) {
@@ -759,8 +796,10 @@ find_missing_parent_records <- function(df) {
 }
 
 build_import_summary <- function(previous_df, softmouse_df, snapshot_df, merged_df,
-                                 conflict_resolutions = NULL) {
-  conflicts <- detect_import_conflicts(softmouse_df, snapshot_df)
+                                 conflict_resolutions = NULL, conflicts = NULL) {
+  if (is.null(conflicts)) {
+    conflicts <- detect_import_conflicts(softmouse_df, snapshot_df)
+  }
   unresolved_conflicts <- find_unresolved_import_conflicts(conflicts, conflict_resolutions)
   duplicates <- dplyr::bind_rows(
     detect_duplicate_ids(softmouse_df, "SoftMouse export"),
@@ -841,7 +880,8 @@ preview_manual_import <- function(db_path, softmouse_path, snapshot_path = NA_ch
 
   softmouse_df <- import_softmouse(softmouse_path)
   snapshot_df <- import_colony_snapshot(snapshot_path)
-  conflict_resolutions <- default_conflict_resolutions(detect_import_conflicts(softmouse_df, snapshot_df))
+  conflicts <- detect_import_conflicts(softmouse_df, snapshot_df)
+  conflict_resolutions <- default_conflict_resolutions(conflicts)
   merged_df <- merge_import_sources(
     softmouse_df,
     snapshot_df,
@@ -853,7 +893,8 @@ preview_manual_import <- function(db_path, softmouse_path, snapshot_path = NA_ch
     softmouse_df,
     snapshot_df,
     merged_df,
-    conflict_resolutions = conflict_resolutions
+    conflict_resolutions = conflict_resolutions,
+    conflicts = conflicts
   )
 
   list(
@@ -889,29 +930,40 @@ run_manual_import <- function(db_path, softmouse_path, snapshot_path = NA_charac
     conflict_resolutions = conflict_resolutions,
     require_resolved = TRUE
   )
-  summary <- build_import_summary(previous_df, softmouse_df, snapshot_df, merged_df, conflict_resolutions = conflict_resolutions)
+  summary <- build_import_summary(
+    previous_df,
+    softmouse_df,
+    snapshot_df,
+    merged_df,
+    conflict_resolutions = conflict_resolutions,
+    conflicts = conflicts
+  )
 
   con <- connect_colony_db(db_path)
   on.exit(DBI::dbDisconnect(con), add = TRUE)
   initialize_colony_db(con)
-  write_snapshot(con, softmouse_df, snapshot_df, merged_df, force = TRUE)
+  DBI::dbWithTransaction(con, {
+    write_snapshot(con, softmouse_df, snapshot_df, merged_df, force = TRUE)
+    seeded_status_breeders <- seed_breeder_annotations_from_status(con, merged_df)
 
-  if (!is.na(census_path) && file.exists(census_path)) {
-    seed_annotations_from_census(con, census_path)
-  }
+    if (!is.na(census_path) && file.exists(census_path)) {
+      seed_annotations_from_census(con, census_path)
+    }
 
-  log_import_conflict_resolutions(con, conflict_resolutions, conflicts)
-  log_change(con, "import", basename(softmouse_path), "manual_import", list(
-    softmouse_rows = nrow(softmouse_df),
-    snapshot_rows = nrow(snapshot_df),
-    merged_rows = nrow(merged_df),
-    conflicts = nrow(summary$conflicts),
-    resolved_conflicts = nrow(summary$conflicts) - nrow(summary$unresolved_conflicts),
-    unresolved_conflicts = nrow(summary$unresolved_conflicts),
-    duplicates = nrow(summary$duplicates)
-    ,
-    missing_parent_links = nrow(summary$missing_parents)
-  ))
+    log_import_conflict_resolutions(con, conflict_resolutions, conflicts)
+    log_change(con, "import", basename(softmouse_path), "manual_import", list(
+      softmouse_rows = nrow(softmouse_df),
+      snapshot_rows = nrow(snapshot_df),
+      merged_rows = nrow(merged_df),
+      status_breeders_seeded = seeded_status_breeders,
+      conflicts = nrow(summary$conflicts),
+      resolved_conflicts = nrow(summary$conflicts) - nrow(summary$unresolved_conflicts),
+      unresolved_conflicts = nrow(summary$unresolved_conflicts),
+      duplicates = nrow(summary$duplicates)
+      ,
+      missing_parent_links = nrow(summary$missing_parents)
+    ))
+  })
 
   list(
     current_df = merged_df,
@@ -956,8 +1008,11 @@ bootstrap_colony_data <- function(data_dir = "data",
     softmouse_df <- import_softmouse(softmouse_path)
     snapshot_df <- import_colony_snapshot(snapshot_path)
     current_df <- merge_import_sources(softmouse_df, snapshot_df)
-    write_snapshot(con, softmouse_df, snapshot_df, current_df, force = force)
-    seed_annotations_from_census(con, census_path)
+    DBI::dbWithTransaction(con, {
+      write_snapshot(con, softmouse_df, snapshot_df, current_df, force = force)
+      seed_breeder_annotations_from_status(con, current_df)
+      seed_annotations_from_census(con, census_path)
+    })
   }
 
   list(

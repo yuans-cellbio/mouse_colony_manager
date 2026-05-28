@@ -69,6 +69,37 @@ test_that("fresh SQLite store exposes an empty but fully typed colony schema", {
   expect_true(all(c("preset_name", "preset_json", "updated_at") %in% names(meta$presets)))
 })
 
+test_that("manual import seeds breeder annotations from SoftMouse mating status", {
+  temp_dir <- tempfile("mousecolony-status-breeders-")
+  dir.create(temp_dir)
+  db_path <- file.path(temp_dir, "colony.sqlite")
+  soft_path <- file.path(temp_dir, "soft.xlsx")
+
+  soft_export <- tibble::tibble(
+    Physical.Tag = c("100", "101"),
+    Sex = c("M", "F"),
+    Date.of.Birth = as.Date(c("2026-01-01", "2026-01-02")),
+    End.Date = as.Date(c(NA, NA)),
+    End.Type = c(NA, NA),
+    Age = c("10 wk", "10 wk"),
+    State = c("Mating", "Active"),
+    Genotype = c("GeneA(Wt/Wt)", "GeneA(Ko/Wt)"),
+    Mouseline = c("Line1", "Line1"),
+    Generation = c("F1", "F1"),
+    Sire.Tag = c(NA, "100"),
+    Dam.Tag = c(NA, NA),
+    `Mating.Partner's.Tag` = c("101", "100")
+  )
+  openxlsx::write.xlsx(soft_export, soft_path)
+
+  result <- run_manual_import(db_path, soft_path)
+  colony <- load_current_colony(db_path)
+
+  expect_equal(nrow(result$conflicts), 0)
+  expect_true(colony$is_breeder[colony$mouse_id == "100"])
+  expect_false(colony$is_breeder[colony$mouse_id == "101"])
+})
+
 test_that("active pairings aggregate rotating partners without duplicating colony rows", {
   temp_dir <- tempfile("mousecolony-pairings-")
   dir.create(temp_dir)
